@@ -1,6 +1,6 @@
-# PostgresDatabaseProject
+# SAPABAPProject
 
-Very simple Visual Studio extension to add a SAP ABAP source code project to your solution. Inspired by the SQL Server Database Project extension, but for SAP ABAP source code.
+Very simple Visual Studio 2022~2026 extension to add a SAP ABAP source code project to your solution. Inspired by the SQL Server Database Project extension, but for SAP ABAP source code.
 
 It allows you to view/browse functions, tables, definitions, etc. as source code. Useful for feeding your underlying SAP function code to your AI minions.
 
