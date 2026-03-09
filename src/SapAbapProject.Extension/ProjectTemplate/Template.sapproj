@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.Build.NoTargets/3.7.56">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <SapDefaultClient>100</SapDefaultClient>
+    <SapSystemId></SapSystemId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="**\*.abap" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectCapability Include="SapAbapSourceProject" />
+  </ItemGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)..\..\BuildSystem\SapAbapProject.props"
+          Condition="Exists('$(MSBuildThisFileDirectory)..\..\BuildSystem\SapAbapProject.props')" />
+  <Import Project="$(MSBuildThisFileDirectory)..\..\BuildSystem\SapAbapProject.targets"
+          Condition="Exists('$(MSBuildThisFileDirectory)..\..\BuildSystem\SapAbapProject.targets')" />
+</Project>

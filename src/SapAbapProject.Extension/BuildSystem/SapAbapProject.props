@@ -1,0 +1,44 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!--
+    Default properties for SAP ABAP Source Projects (.sapproj).
+    These are imported automatically by the project file.
+  -->
+  <PropertyGroup>
+    <SapDefaultClient Condition="'$(SapDefaultClient)' == ''">100</SapDefaultClient>
+    <SapSystemId Condition="'$(SapSystemId)' == ''"></SapSystemId>
+
+    <!-- Suppress .NET build output - this is a source-only project -->
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <!-- CPS project capability for icon and feature detection -->
+  <ItemGroup>
+    <ProjectCapability Include="SapAbapSourceProject" />
+  </ItemGroup>
+
+  <!-- Define ABAP script item type -->
+  <ItemGroup>
+    <AvailableItemName Include="AbapScript" />
+  </ItemGroup>
+
+  <!-- Include all .abap files as AbapScript items by default -->
+  <ItemGroup>
+    <AbapScript Include="FunctionGroups\**\*.abap" Condition="Exists('FunctionGroups')" />
+    <AbapScript Include="FunctionModules\**\*.abap" Condition="Exists('FunctionModules')" />
+    <AbapScript Include="DataElements\**\*.abap" Condition="Exists('DataElements')" />
+    <AbapScript Include="Domains\**\*.abap" Condition="Exists('Domains')" />
+    <AbapScript Include="Structures\**\*.abap" Condition="Exists('Structures')" />
+    <AbapScript Include="Tables\**\*.abap" Condition="Exists('Tables')" />
+    <AbapScript Include="TableTypes\**\*.abap" Condition="Exists('TableTypes')" />
+    <AbapScript Include="Programs\**\*.abap" Condition="Exists('Programs')" />
+    <AbapScript Include="Includes\**\*.abap" Condition="Exists('Includes')" />
+  </ItemGroup>
+
+  <!-- Make AbapScript items visible in Solution Explorer as None items -->
+  <ItemGroup>
+    <None Include="@(AbapScript)" />
+  </ItemGroup>
+</Project>

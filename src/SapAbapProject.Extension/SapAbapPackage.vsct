@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable"
+              xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+  <Extern href="stdidcmd.h" />
+  <Extern href="vsshlids.h" />
+  <Include href="KnownImageIds.vsct"/>
+
+  <Commands package="guidSapAbapPackage">
+    <Menus>
+      <Menu guid="guidSapCmdSet" id="SapAbapToolbar" type="Toolbar" priority="0x0000">
+        <Strings>
+          <ButtonText>SAP ABAP</ButtonText>
+        </Strings>
+      </Menu>
+    </Menus>
+
+    <Groups>
+      <!-- Project context menu group -->
+      <Group guid="guidSapCmdSet" id="SapMenuGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_PROJNODE" />
+      </Group>
+      <!-- Toolbar group -->
+      <Group guid="guidSapCmdSet" id="SapToolbarGroup" priority="0x0000">
+        <Parent guid="guidSapCmdSet" id="SapAbapToolbar" />
+      </Group>
+    </Groups>
+
+    <Buttons>
+      <!-- Import from SAP System - project context menu -->
+      <Button guid="guidSapCmdSet" id="cmdImportFromSap" priority="0x0100" type="Button">
+        <Parent guid="guidSapCmdSet" id="SapMenuGroup" />
+        <Strings>
+          <ButtonText>Import from SAP System...</ButtonText>
+        </Strings>
+      </Button>
+
+      <!-- Connect to SAP - toolbar -->
+      <Button guid="guidSapCmdSet" id="cmdConnectSap" priority="0x0100" type="Button">
+        <Parent guid="guidSapCmdSet" id="SapToolbarGroup" />
+        <Icon guid="ImageCatalogGuid" id="ConnectToDatabase" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <CommandFlag>TextChanges</CommandFlag>
+        <Strings>
+          <ButtonText>Connect to SAP</ButtonText>
+        </Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+
+  <VisibilityConstraints>
+    <VisibilityItem guid="guidSapCmdSet" id="SapAbapToolbar" context="guidAbapUIContext"/>
+  </VisibilityConstraints>
+
+  <Symbols>
+    <GuidSymbol name="guidSapAbapPackage" value="{a1b2c3d4-e5f6-7890-abcd-ef1234567890}" />
+    <GuidSymbol name="guidAbapUIContext" value="{c8d9e0f1-a2b3-4567-8901-23456789abcd}" />
+    <GuidSymbol name="guidSapCmdSet" value="{f2a1b3c4-d5e6-7890-abcd-123456789abc}">
+      <IDSymbol name="SapAbapToolbar" value="0x1000" />
+      <IDSymbol name="SapMenuGroup" value="0x1020" />
+      <IDSymbol name="SapToolbarGroup" value="0x1030" />
+      <IDSymbol name="cmdImportFromSap" value="0x0100" />
+      <IDSymbol name="cmdConnectSap" value="0x0200" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>

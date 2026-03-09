@@ -1,0 +1,29 @@
+{
+  "Sap": {
+    "AppServerHost": "your-sap-server",
+    "SystemNumber": "00",
+    "Client": "100",
+    "User": "YOUR_USER",
+    "Password": "YOUR_PASSWORD",
+    "Language": "EN",
+    "SapRouter": "",
+    "SdkPath": "D:\\dev\\SQMC.git\\SQM.Backend.Datasync.API\\Libs"
+  },
+  "Import": {
+    "PackageSearchPattern": "Z*",
+    "Packages": [ "ZTEST" ],
+    "FunctionModuleNamePattern": "Z_*",
+    "FunctionGroupFilter": "",
+    "IncludeDocumentation": true,
+    "IncludeSignature": true,
+    "OverwriteExisting": true,
+    "ObjectTypes": [
+      "FunctionModule",
+      "DataElement",
+      "Domain",
+      "TransparentTable",
+      "Structure",
+      "TableType"
+    ]
+  }
+}

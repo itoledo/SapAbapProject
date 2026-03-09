@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/SapAbapProject.Core/SapAbapProject.Core.csproj" />
+    <Project Path="src/SapAbapProject.Extension/SapAbapProject.Extension.csproj" />
+    <Project Path="src/SapAbapProject.RfcExtractor/SapAbapProject.RfcExtractor.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SapAbapProject.RfcExtractor.Tests/SapAbapProject.RfcExtractor.Tests.csproj" />
+  </Folder>
+</Solution>

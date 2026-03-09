@@ -1,0 +1,24 @@
+<VSTemplate Version="3.0.0" Type="Project"
+    xmlns="http://schemas.microsoft.com/developer/vstemplate/2005">
+  <TemplateData>
+    <Name>SAP ABAP Source Project</Name>
+    <Description>A project for managing SAP ABAP source code extracted from SAP systems. Supports importing function modules, data elements, domains, structures, and tables via RFC.</Description>
+    <ProjectType>CSharp</ProjectType>
+    <SortOrder>9000</SortOrder>
+    <CreateNewFolder>true</CreateNewFolder>
+    <DefaultName>SapAbapProject</DefaultName>
+    <ProvideDefaultName>true</ProvideDefaultName>
+    <CreateInPlace>true</CreateInPlace>
+    <LanguageTag>ABAP</LanguageTag>
+    <PlatformTag>windows</PlatformTag>
+    <ProjectTypeTag>SAP</ProjectTypeTag>
+  </TemplateData>
+  <TemplateContent>
+    <Project File="Template.csproj" ReplaceParameters="false">
+    </Project>
+  </TemplateContent>
+  <WizardExtension>
+    <Assembly>SapAbapProject.Extension, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null</Assembly>
+    <FullClassName>SapAbapProject.Extension.SapProjectTemplateWizard</FullClassName>
+  </WizardExtension>
+</VSTemplate>

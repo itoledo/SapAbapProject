@@ -1,0 +1,18 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!--
+    Build targets for SAP ABAP Source Projects (.sapproj).
+    The default Build target lists all ABAP source scripts.
+  -->
+
+  <Target Name="ListAbapScripts" BeforeTargets="Build">
+    <Message Importance="normal" Text="SAP ABAP Source Project: $(MSBuildProjectName)" />
+    <Message Importance="normal" Text="  SAP Client: $(SapDefaultClient)" />
+    <Message Importance="normal" Text="  System ID:  $(SapSystemId)" />
+    <Message Importance="low" Text="  ABAP Script: %(AbapScript.Identity)" />
+  </Target>
+
+  <Target Name="ValidateProject" BeforeTargets="Build">
+    <Warning Text="No ABAP source files found in project. Use 'Import from SAP System...' to extract source code."
+             Condition="'@(AbapScript)' == ''" />
+  </Target>
+</Project>

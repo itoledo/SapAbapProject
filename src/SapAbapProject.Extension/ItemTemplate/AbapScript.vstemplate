@@ -1,0 +1,13 @@
+<VSTemplate Version="3.0.0" Type="Item"
+    xmlns="http://schemas.microsoft.com/developer/vstemplate/2005">
+  <TemplateData>
+    <Name>ABAP Source File</Name>
+    <Description>An empty ABAP source file (.abap)</Description>
+    <ProjectType>CSharp</ProjectType>
+    <DefaultName>Source</DefaultName>
+    <ProvideDefaultName>true</ProvideDefaultName>
+  </TemplateData>
+  <TemplateContent>
+    <ProjectItem TargetFileName="$fileinputname$.abap">Script.abap</ProjectItem>
+  </TemplateContent>
+</VSTemplate>

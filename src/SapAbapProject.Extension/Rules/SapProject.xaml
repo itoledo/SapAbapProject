@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Rule Name="SapProject" DisplayName="SAP ABAP Source"
+      PageTemplate="generic"
+      Description="SAP ABAP Source Project Properties"
+      xmlns="http://schemas.microsoft.com/build/2009/properties">
+
+  <Rule.DataSource>
+    <DataSource Persistence="ProjectFile" HasConfigurationCondition="false" />
+  </Rule.DataSource>
+
+  <StringProperty Name="SapDefaultClient"
+                  DisplayName="Default SAP Client"
+                  Description="The default SAP client number for connections."
+                  Default="100" />
+
+  <StringProperty Name="SapSystemId"
+                  DisplayName="SAP System ID"
+                  Description="The SAP system ID (SID) for this project." />
+</Rule>

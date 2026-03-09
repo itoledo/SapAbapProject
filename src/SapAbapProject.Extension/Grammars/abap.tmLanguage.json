@@ -1,0 +1,162 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "ABAP",
+  "scopeName": "source.abap",
+  "fileTypes": ["abap"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords-declaration" },
+    { "include": "#keywords-control" },
+    { "include": "#keywords-operation" },
+    { "include": "#keywords-type" },
+    { "include": "#keywords-sql" },
+    { "include": "#builtins" },
+    { "include": "#operators" },
+    { "include": "#system-variables" },
+    { "include": "#data-types" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.asterisk.abap",
+          "match": "^\\*.*$"
+        },
+        {
+          "name": "comment.line.quote.abap",
+          "match": "\".*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.single.abap",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.abap",
+              "match": "''"
+            }
+          ]
+        },
+        {
+          "name": "string.template.abap",
+          "begin": "\\|",
+          "end": "\\|",
+          "patterns": [
+            {
+              "name": "variable.other.embedded.abap",
+              "begin": "\\{",
+              "end": "\\}"
+            },
+            {
+              "name": "constant.character.escape.abap",
+              "match": "\\\\[\\\\|{}ntr]"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.backtick.abap",
+          "begin": "`",
+          "end": "`"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.abap",
+          "match": "\\b\\d+(\\.\\d+)?\\b"
+        }
+      ]
+    },
+    "keywords-declaration": {
+      "patterns": [
+        {
+          "name": "keyword.other.declaration.abap",
+          "match": "(?i)\\b(REPORT|PROGRAM|FUNCTION-POOL|FUNCTION|ENDFUNCTION|FORM|ENDFORM|MODULE|ENDMODULE|CLASS|ENDCLASS|INTERFACE|ENDINTERFACE|METHOD|ENDMETHOD|DATA|TYPES|CONSTANTS|STATICS|FIELD-SYMBOLS|PARAMETERS|SELECT-OPTIONS|TABLES|INCLUDE|TYPE-POOLS|TYPE-POOL|RANGES|CONTROLS|NODES|EVENTS|CLASS-DATA|CLASS-METHODS|CLASS-EVENTS|PUBLIC|PROTECTED|PRIVATE|SECTION|DEFINITION|IMPLEMENTATION|INHERITING\\s+FROM|ABSTRACT|FINAL|CREATE\\s+PUBLIC|CREATE\\s+PROTECTED|CREATE\\s+PRIVATE|FRIENDS|ALIASES|IMPORTING|EXPORTING|CHANGING|TABLES|RETURNING|RAISING|EXCEPTIONS|OPTIONAL|DEFAULT|PREFERRED\\s+PARAMETER|VALUE|REFERENCE|LIKE|TYPE|TYPE\\s+REF\\s+TO|STRUCTURE|BEGIN\\s+OF|END\\s+OF|OCCURS|WITH\\s+HEADER\\s+LINE)\\b"
+        }
+      ]
+    },
+    "keywords-control": {
+      "patterns": [
+        {
+          "name": "keyword.control.abap",
+          "match": "(?i)\\b(IF|ELSE|ELSEIF|ENDIF|CASE|WHEN|OTHERS|ENDCASE|DO|ENDDO|WHILE|ENDWHILE|LOOP|ENDLOOP|AT|ENDAT|EXIT|CHECK|CONTINUE|RETURN|STOP|REJECT|RAISE|TRY|CATCH|CLEANUP|ENDTRY|RETRY|RESUME|ASSERT|WAIT|SUBMIT|LEAVE|CALL\\s+FUNCTION|CALL\\s+METHOD|CALL\\s+SCREEN|CALL\\s+SELECTION-SCREEN|CALL\\s+TRANSACTION|CALL\\s+SUBSCREEN|CALL\\s+DIALOG|PERFORM|ON\\s+CHANGE\\s+OF|PROVIDE|ENDPROVIDE)\\b"
+        }
+      ]
+    },
+    "keywords-operation": {
+      "patterns": [
+        {
+          "name": "keyword.other.operation.abap",
+          "match": "(?i)\\b(MOVE|MOVE-CORRESPONDING|ASSIGN|UNASSIGN|COMPUTE|ADD|SUBTRACT|MULTIPLY|DIVIDE|APPEND|INSERT|MODIFY|DELETE|COLLECT|READ\\s+TABLE|SORT|DESCRIBE|REFRESH|CLEAR|FREE|CONCATENATE|SPLIT|CONDENSE|TRANSLATE|REPLACE|SHIFT|OVERLAY|SEARCH|FIND|WRITE|SKIP|ULINE|NEW-LINE|NEW-PAGE|FORMAT|POSITION|SET\\s+PF-STATUS|SET\\s+TITLEBAR|SET\\s+CURSOR|GET\\s+CURSOR|MESSAGE|AUTHORITY-CHECK|COMMIT\\s+WORK|ROLLBACK\\s+WORK|SET\\s+UPDATE\\s+TASK|EXPORT|IMPORT|FREE\\s+MEMORY|GET\\s+TIME|GET\\s+PARAMETER|SET\\s+PARAMETER|CREATE\\s+OBJECT|CREATE\\s+DATA|ASSIGN\\s+COMPONENT|FIELD-GROUPS|EXTRACT|SUM|CNT|OPEN\\s+DATASET|CLOSE\\s+DATASET|TRANSFER|READ\\s+DATASET|GET\\s+DATASET|SET\\s+DATASET|RECEIVE|SEND)\\b"
+        }
+      ]
+    },
+    "keywords-type": {
+      "patterns": [
+        {
+          "name": "keyword.other.type-definition.abap",
+          "match": "(?i)\\b(DATA-ELEMENT|END-DATA-ELEMENT|DOMAIN|END-DOMAIN|TABLE|STRUCTURE|END-STRUCTURE|END-TABLE|TABLE-TYPE|END-TABLE-TYPE|DEFINE|KEY|FIXED-VALUES|FIELD-LABEL|SHORT|MEDIUM|LONG|HEADING|DATA-TYPE|DECIMALS|OUTPUT-LENGTH|ROW-TYPE|ACCESS-MODE|STANDARD\\s+TABLE|SORTED\\s+TABLE|HASHED\\s+TABLE|NOT\\s+NULL)\\b"
+        }
+      ]
+    },
+    "keywords-sql": {
+      "patterns": [
+        {
+          "name": "keyword.other.sql.abap",
+          "match": "(?i)\\b(SELECT|ENDSELECT|FROM|WHERE|AND|OR|NOT|IN|BETWEEN|LIKE|ORDER\\s+BY|GROUP\\s+BY|HAVING|INTO|CORRESPONDING\\s+FIELDS\\s+OF|TABLE|APPENDING|SINGLE|DISTINCT|UP\\s+TO|ROWS|JOIN|INNER\\s+JOIN|LEFT\\s+OUTER\\s+JOIN|RIGHT\\s+OUTER\\s+JOIN|CROSS\\s+JOIN|ON|AS|FOR\\s+ALL\\s+ENTRIES\\s+IN|UNION|EXCEPT|INTERSECT|EXISTS|PACKAGE\\s+SIZE|BYPASSING\\s+BUFFER|CLIENT\\s+SPECIFIED|CONNECTION|UPDATE|INSERT\\s+INTO|DELETE\\s+FROM|MODIFY|OPEN\\s+CURSOR|CLOSE\\s+CURSOR|FETCH\\s+NEXT\\s+CURSOR)\\b"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.abap",
+          "match": "(?i)\\b(strlen|xstrlen|lines|numofchar|charlen|dbmaxlen|char_off|substring|substring_after|substring_before|substring_from|substring_to|to_upper|to_lower|to_mixed|from_mixed|concat_lines_of|condense|escape|insert|match|replace|reverse|segment|shift_left|shift_right|translate|repeat|line_exists|line_index|abs|sign|ceil|floor|frac|trunc|ipow|nmin|nmax|log|log10|exp|sqrt|cos|sin|tan|acos|asin|atan|cosh|sinh|tanh|contains|contains_any_of|contains_any_not_of|matches|count|count_any_of|count_any_not_of|find|find_any_of|find_any_not_of|distance|xsdbool|boolc|boolx|conv|cast|cond|switch|corresponding|exact|filter|reduce|value|new|ref)\\b(?=\\s*\\()"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.comparison.abap",
+          "match": "(?i)\\b(EQ|NE|LT|GT|LE|GE|CO|CN|CA|NA|CS|NS|CP|NP|IS\\s+INITIAL|IS\\s+NOT\\s+INITIAL|IS\\s+BOUND|IS\\s+NOT\\s+BOUND|IS\\s+ASSIGNED|IS\\s+NOT\\s+ASSIGNED|IS\\s+SUPPLIED|IS\\s+NOT\\s+SUPPLIED|IS\\s+INSTANCE\\s+OF|BETWEEN)\\b"
+        },
+        {
+          "name": "keyword.operator.assignment.abap",
+          "match": "=>|->|=|\\+=|-=|\\?="
+        },
+        {
+          "name": "keyword.operator.arithmetic.abap",
+          "match": "[+\\-*/]"
+        },
+        {
+          "name": "keyword.operator.string.abap",
+          "match": "&&"
+        }
+      ]
+    },
+    "system-variables": {
+      "patterns": [
+        {
+          "name": "variable.language.system.abap",
+          "match": "(?i)\\bsy-(subrc|tabix|index|dbcnt|fdpos|mandt|uname|datum|uzeit|tzone|langu|msgid|msgty|msgno|msgv1|msgv2|msgv3|msgv4|batch|binpt|calld|cprog|dynnr|repid|tabix|tfill|tleng|linct|linno|linsz|pagct|pagno|pfkey|title|ucomm|lsind|listi|lisel|cucol|curow|host|opsys|saprl|sysid)\\b"
+        }
+      ]
+    },
+    "data-types": {
+      "patterns": [
+        {
+          "name": "storage.type.abap",
+          "match": "(?i)\\b(c|n|d|t|x|i|b|s|p|f|string|xstring|decfloat16|decfloat34|int8|utclong|numc|char|dats|tims|clnt|lang|quan|curr|cuky|unit|prec|raw|rawstring|lraw|fltp|accp|lchr|sstring|geom_ewkb|datn|timn|int1|int2|int4)\\b"
+        }
+      ]
+    }
+  }
+}

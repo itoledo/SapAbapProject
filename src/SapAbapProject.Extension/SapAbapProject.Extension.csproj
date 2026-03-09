@@ -1,0 +1,184 @@
+<Project>
+  <!-- Explicit SDK imports so VsSDK.targets can be imported AFTER SDK targets -->
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <ImplicitUsings>false</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SapAbapProject.Extension</RootNamespace>
+    <AssemblyName>SapAbapProject.Extension</AssemblyName>
+
+    <!-- VSIX settings -->
+    <GeneratePkgDefFile>true</GeneratePkgDefFile>
+    <UseCodebase>true</UseCodebase>
+    <CreateVsixContainer>true</CreateVsixContainer>
+    <DeployExtension Condition="'$(MSBuildRuntimeType)' != 'Core'">true</DeployExtension>
+    <DeployExtension Condition="'$(MSBuildRuntimeType)' == 'Core'">false</DeployExtension>
+    <IncludeAssemblyInVSIXContainer>true</IncludeAssemblyInVSIXContainer>
+    <IncludeDebugSymbolsInVSIXContainer>false</IncludeDebugSymbolsInVSIXContainer>
+    <IncludeDebugSymbolsInLocalVSIXDeployment>false</IncludeDebugSymbolsInLocalVSIXDeployment>
+    <CopyBuildOutputToOutputDirectory>true</CopyBuildOutputToOutputDirectory>
+    <CopyVsixManifestToOutput>true</CopyVsixManifestToOutput>
+
+    <!-- WPF support for dialogs -->
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableDefaultPageItems>false</EnableDefaultPageItems>
+
+    <!-- Start VS experimental instance for debugging -->
+    <StartAction>Program</StartAction>
+    <StartProgram>$(DevEnvDir)devenv.exe</StartProgram>
+    <StartArguments>/rootsuffix Exp</StartArguments>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.VisualStudio.Sdk" />
+    <PackageReference Include="Microsoft.VSSDK.BuildTools" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.VisualStudio.TemplateWizardInterface" IncludeAssets="compile" />
+    <PackageReference Include="Microsoft.VisualStudio.ProjectSystem" IncludeAssets="compile" />
+  </ItemGroup>
+
+  <!-- WPF XAML pages -->
+  <ItemGroup>
+    <Page Include="Dialogs\ImportWizardDialog.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Compile Update="Dialogs\ImportWizardDialog.xaml.cs">
+      <DependentUpon>ImportWizardDialog.xaml</DependentUpon>
+    </Compile>
+    <Page Include="Dialogs\ConnectDialog.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Compile Update="Dialogs\ConnectDialog.xaml.cs">
+      <DependentUpon>ConnectDialog.xaml</DependentUpon>
+    </Compile>
+    <Page Include="Dialogs\SdkPathDialog.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Compile Update="Dialogs\SdkPathDialog.xaml.cs">
+      <DependentUpon>SdkPathDialog.xaml</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SapAbapProject.Core\SapAbapProject.Core.csproj" />
+    <ProjectReference Include="..\SapAbapProject.RfcExtractor\SapAbapProject.RfcExtractor.csproj" />
+  </ItemGroup>
+
+  <!-- Include VSCT command table -->
+  <ItemGroup>
+    <VSCTCompile Include="SapAbapPackage.vsct">
+      <ResourceName>Menus.ctmenu</ResourceName>
+    </VSCTCompile>
+  </ItemGroup>
+
+  <!-- Icon and license for Marketplace -->
+  <ItemGroup>
+    <Content Include="icon.png">
+      <IncludeInVSIX>true</IncludeInVSIX>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="LICENSE.txt">
+      <IncludeInVSIX>true</IncludeInVSIX>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Include custom pkgdef for .sapproj registration -->
+  <ItemGroup>
+    <Content Include="SapAbapProject.pkgdef">
+      <IncludeInVSIX>true</IncludeInVSIX>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Embed BuildSystem files in VSIX -->
+  <ItemGroup>
+    <Content Include="BuildSystem\**\*">
+      <IncludeInVSIX>true</IncludeInVSIX>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Exclude template sources from default handling -->
+  <ItemGroup>
+    <None Remove="ProjectTemplate\**\*" />
+    <Content Remove="ProjectTemplate\**\*" />
+    <None Remove="ItemTemplate\**\*" />
+    <Content Remove="ItemTemplate\**\*" />
+  </ItemGroup>
+
+  <!-- Create template zip manually since VSSDK GetVSTemplateItems doesn't handle .sapproj -->
+  <Target Name="CreateTemplateZip" BeforeTargets="GetVsixSourceItems" DependsOnTargets="Compile">
+    <PropertyGroup>
+      <_TemplateZipDir>$(IntermediateOutputPath)ProjectTemplates\CSharp\SAPABAP\1033\</_TemplateZipDir>
+      <_TemplateZipPath>$(_TemplateZipDir)SAPABAPProject.zip</_TemplateZipPath>
+      <_TemplateOutputDir>$(OutputPath)ProjectTemplates\CSharp\SAPABAP\1033\</_TemplateOutputDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(_TemplateZipDir)" />
+    <MakeDir Directories="$(_TemplateOutputDir)" />
+    <Delete Files="$(_TemplateZipPath)" Condition="Exists('$(_TemplateZipPath)')" />
+    <ZipDirectory SourceDirectory="$(MSBuildProjectDirectory)\ProjectTemplate"
+                  DestinationFile="$(_TemplateZipPath)" />
+    <Copy SourceFiles="$(_TemplateZipPath)" DestinationFolder="$(_TemplateOutputDir)" />
+    <!-- Add to VSIX source items so it gets packaged -->
+    <ItemGroup>
+      <VSIXSourceItem Include="$(_TemplateOutputDir)SAPABAPProject.zip">
+        <VSIXSubPath>ProjectTemplates\CSharp\SAPABAP\1033\</VSIXSubPath>
+      </VSIXSourceItem>
+    </ItemGroup>
+    <Message Importance="High" Text="Created template zip: $(_TemplateOutputDir)SAPABAPProject.zip" />
+  </Target>
+
+  <!-- Create item template zip -->
+  <Target Name="CreateItemTemplateZip" BeforeTargets="GetVsixSourceItems" DependsOnTargets="Compile">
+    <PropertyGroup>
+      <_ItemTemplateZipDir>$(IntermediateOutputPath)ItemTemplates\CSharp\SAPABAP\1033\</_ItemTemplateZipDir>
+      <_ItemTemplateZipPath>$(_ItemTemplateZipDir)ABAPSource.zip</_ItemTemplateZipPath>
+      <_ItemTemplateOutputDir>$(OutputPath)ItemTemplates\CSharp\SAPABAP\1033\</_ItemTemplateOutputDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(_ItemTemplateZipDir)" />
+    <MakeDir Directories="$(_ItemTemplateOutputDir)" />
+    <Delete Files="$(_ItemTemplateZipPath)" Condition="Exists('$(_ItemTemplateZipPath)')" />
+    <ZipDirectory SourceDirectory="$(MSBuildProjectDirectory)\ItemTemplate"
+                  DestinationFile="$(_ItemTemplateZipPath)" />
+    <Copy SourceFiles="$(_ItemTemplateZipPath)" DestinationFolder="$(_ItemTemplateOutputDir)" />
+    <ItemGroup>
+      <VSIXSourceItem Include="$(_ItemTemplateOutputDir)ABAPSource.zip">
+        <VSIXSubPath>ItemTemplates\CSharp\SAPABAP\1033\</VSIXSubPath>
+      </VSIXSourceItem>
+    </ItemGroup>
+    <Message Importance="High" Text="Created item template zip: $(_ItemTemplateOutputDir)ABAPSource.zip" />
+  </Target>
+
+  <!-- Include TextMate grammar for ABAP -->
+  <ItemGroup>
+    <Content Include="Grammars\**\*">
+      <IncludeInVSIX>true</IncludeInVSIX>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Include XAML rules -->
+  <ItemGroup>
+    <Content Include="Rules\**\*.xaml">
+      <IncludeInVSIX>true</IncludeInVSIX>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="source.extension.vsixmanifest">
+      <SubType>Designer</SubType>
+    </Content>
+  </ItemGroup>
+
+  <!-- SDK targets first, then VsSDK targets (order matters for PrepareForRunDependsOn) -->
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+  <Import Project="$(VsSDKInstall)\Microsoft.VsSDK.targets" />
+</Project>

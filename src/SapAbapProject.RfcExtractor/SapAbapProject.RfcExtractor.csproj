@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net472;net8.0</TargetFrameworks>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="SapAbapProject.RfcExtractor.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="SapNwRfc" />
+    <PackageReference Include="PolySharp" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SapAbapProject.Core\SapAbapProject.Core.csproj" />
+  </ItemGroup>
+</Project>
