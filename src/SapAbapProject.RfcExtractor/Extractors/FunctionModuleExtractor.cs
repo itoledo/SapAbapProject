@@ -71,8 +71,12 @@ internal sealed class FunctionModuleExtractor : BaseExtractor
 
     private AbapObject? ExtractFunctionModule(string functionName, ImportOptions options)
     {
-        // Get source code with fallback chain
+        // Get source code with fallback chain:
+        // 1. RPY_FUNCTIONMODULE_READ (works for lines <= 72 chars)
+        // 2. RPY_FUNCTIONMODULE_READ_NEW + NEW_SOURCE (handles lines > 72 chars)
+        // 3. RFC_READ_REPORT via include name (if available)
         var source = GetSourceViaRpy(functionName)
+                  ?? GetSourceViaRpyNew(functionName)
                   ?? GetSourceViaReadReport(functionName)
                   ?? "";
 
@@ -145,37 +149,73 @@ internal sealed class FunctionModuleExtractor : BaseExtractor
     }
 
     /// <summary>
-    /// Fallback: get include name from TFDIR/ENLFDIR, then read it via RFC_READ_REPORT.
+    /// RPY_FUNCTIONMODULE_READ_NEW — handles source lines longer than 72 chars.
+    /// The source is returned in the CHANGING parameter NEW_SOURCE (RSFB_SOURCE = STRING_TABLE)
+    /// which SapNwRfc cannot map natively. We read it via reflection + SAP RFC C SDK interop.
+    /// </summary>
+    private string? GetSourceViaRpyNew(string functionName)
+    {
+        try
+        {
+            using var func = Connection.CreateFunction("RPY_FUNCTIONMODULE_READ_NEW");
+            func.Invoke(new RpyFuncReadInput { FunctionName = functionName });
+
+            var lines = SapRfcStringTableReader.ReadStringTable(func, "NEW_SOURCE");
+            if (lines is { Count: > 0 })
+                return string.Join(Environment.NewLine, lines);
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>
+    /// Fallback: construct include name from TFDIR (PNAME + INCLUDE suffix),
+    /// then read it via RFC_READ_REPORT.
+    /// TFDIR.INCLUDE stores a numeric suffix (e.g. "11"), the real include
+    /// program is L&lt;AREA&gt;U&lt;NN&gt; where AREA = PNAME minus "SAPL" prefix.
     /// </summary>
     private string? GetSourceViaReadReport(string functionName)
     {
         try
         {
-            // Get include program name
-            string? include = null;
-
-            var tfdir = ReadTable("TFDIR", ["INCLUDE", "PNAME"], $"FUNCNAME = '{functionName}'");
-            if (tfdir.Count > 0)
-                include = tfdir[0].GetValueOrDefault("INCLUDE", "").Trim();
-
-            if (string.IsNullOrEmpty(include))
-            {
-                // Try ENLFDIR which has the include mapping
-                try
-                {
-                    var enlfdir = ReadTable("ENLFDIR", ["INCLUDE"], $"FUNCNAME = '{functionName}'");
-                    if (enlfdir.Count > 0)
-                        include = enlfdir[0].GetValueOrDefault("INCLUDE", "").Trim();
-                }
-                catch { }
-            }
-
-            if (string.IsNullOrEmpty(include))
+            var tfdir = ReadTable("TFDIR", ["PNAME", "INCLUDE"], $"FUNCNAME = '{functionName}'");
+            if (tfdir.Count == 0)
                 return null;
 
+            var pname = tfdir[0].GetValueOrDefault("PNAME", "").Trim();
+            var includeSuffix = tfdir[0].GetValueOrDefault("INCLUDE", "").Trim();
+
+            if (string.IsNullOrEmpty(pname))
+                return null;
+
+            // Derive function group area from pool name (SAPLZSW_APP → ZSW_APP)
+            var area = pname.StartsWith("SAPL", StringComparison.OrdinalIgnoreCase)
+                ? pname.Substring(4)
+                : pname;
+
+            // Build the include program name: L<AREA>U<suffix>
+            string includeName;
+            if (!string.IsNullOrEmpty(includeSuffix))
+                includeName = $"L{area}U{includeSuffix}";
+            else
+                includeName = $"L{area}U01"; // default to U01 if no suffix
+
+            return ReadReportSource(includeName);
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>
+    /// Read an ABAP program's source via RFC_READ_REPORT.
+    /// </summary>
+    private string? ReadReportSource(string programName)
+    {
+        try
+        {
             using var readReport = Connection.CreateFunction("RFC_READ_REPORT");
             var output = readReport.Invoke<ReadReportOutput>(
-                new ReadReportInput { ProgramName = include! });
+                new ReadReportInput { ProgramName = programName });
             var lines = output.Source ?? [];
             if (lines.Length > 0)
                 return string.Join(Environment.NewLine, lines.Select(l => l.Line));
@@ -286,6 +326,21 @@ internal sealed class RpyFuncReadOutput
 {
     [SapName("SOURCE")]
     public SourceLine[] Source { get; set; } = [];
+}
+
+internal sealed class RpyFuncReadNewOutput
+{
+    [SapName("NEW_SOURCE")]
+    public StringTableRow[] NewSource { get; set; } = [];
+
+    [SapName("SOURCE")]
+    public SourceLine[] Source { get; set; } = [];
+}
+
+internal sealed class StringTableRow
+{
+    [SapName("TABLE_LINE")]
+    public string Value { get; set; } = string.Empty;
 }
 
 internal sealed class RpyFuncInterfaceOutput

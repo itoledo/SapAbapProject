@@ -73,19 +73,37 @@ public class RfcExtractionTests
         var objects = await extractor.ExtractObjectsAsync(options, progress);
 
         _output.WriteLine($"\nExtracted {objects.Count} function modules.");
-        foreach (var obj in objects.Take(5))
+
+        var missing = new List<string>();
+        foreach (var obj in objects)
         {
-            _output.WriteLine($"  {obj.Name} [{obj.PackageName}] — {obj.Description}");
-            _output.WriteLine($"    Source length: {obj.SourceCode.Length} chars");
-            _output.WriteLine($"    Path: {obj.RelativePath}");
+            // Strip the generated header (lines starting with *)
+            var bodyLines = obj.SourceCode
+                .Split('\n')
+                .Select(l => l.TrimEnd('\r'))
+                .SkipWhile(l => l.StartsWith("*"))
+                .ToList();
+            var body = string.Join("\n", bodyLines).Trim();
+
+            if (string.IsNullOrWhiteSpace(body))
+            {
+                missing.Add(obj.Name);
+                _output.WriteLine($"  [NO SOURCE] {obj.Name} [{obj.PackageName}] — total length: {obj.SourceCode.Length}");
+            }
+        }
+
+        var withSource = objects.Count - missing.Count;
+        _output.WriteLine($"\nSummary: {withSource}/{objects.Count} have source code, {missing.Count} missing.");
+
+        if (missing.Count > 0)
+        {
+            _output.WriteLine($"\nFunction modules WITHOUT source code ({missing.Count}):");
+            foreach (var name in missing)
+                _output.WriteLine($"  - {name}");
         }
 
         Assert.NotEmpty(objects);
-        Assert.All(objects, o =>
-        {
-            Assert.Equal(AbapObjectType.FunctionModule, o.ObjectType);
-            Assert.False(string.IsNullOrWhiteSpace(o.SourceCode));
-        });
+        Assert.Empty(missing);
     }
 
     [Fact]
@@ -261,6 +279,178 @@ public class RfcExtractionTests
             if (Directory.Exists(outputDir))
                 Directory.Delete(outputDir, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task DiagnoseSourceExtraction_ForFailingFunction()
+    {
+        var funcName = "ZSW_APP_CALC_STOCK_DISPONIBLE";
+
+        using var extractor = _fixture.CreateExtractor();
+        // Force connection by pinging
+        await extractor.TestConnectionAsync();
+
+        // Access connection via internal field
+        var connField = typeof(AbapObjectExtractor).GetField("_connection",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var conn = (SapNwRfc.SapConnection)connField!.GetValue(extractor)!;
+
+        // 1. Try RPY_FUNCTIONMODULE_READ for SOURCE
+        _output.WriteLine("=== 1. RPY_FUNCTIONMODULE_READ (SOURCE) ===");
+        try
+        {
+            using var rpyFunc = conn.CreateFunction("RPY_FUNCTIONMODULE_READ");
+            var output = rpyFunc.Invoke<Extractors.RpyFuncReadOutput>(
+                new Extractors.RpyFuncReadInput { FunctionName = funcName });
+            var lines = output.Source ?? [];
+            _output.WriteLine($"  SOURCE lines: {lines.Length}");
+            foreach (var l in lines.Take(10))
+                _output.WriteLine($"    '{l.Line}'");
+        }
+        catch (Exception ex)
+        {
+            _output.WriteLine($"  FAILED: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        // 2. TFDIR lookup (PNAME + INCLUDE)
+        _output.WriteLine("\n=== 2. TFDIR lookup ===");
+        string? include = null;
+        string? pname = null;
+        try
+        {
+            using var rfcRead = conn.CreateFunction("RFC_READ_TABLE");
+            var output = rfcRead.Invoke<Extractors.RfcReadTableOutput>(new Extractors.RfcReadTableInput
+            {
+                QueryTable = "TFDIR",
+                Delimiter = "|",
+                Fields = [new Extractors.RfcTableField { FieldName = "PNAME" }],
+                Options = [new Extractors.RfcReadTableOption { Text = $"FUNCNAME = '{funcName}'" }],
+            });
+            var data = output.Data ?? [];
+            _output.WriteLine($"  TFDIR rows: {data.Length}");
+            if (data.Length > 0)
+            {
+                pname = data[0].Wa.Trim();
+                _output.WriteLine($"  PNAME: '{pname}'");
+            }
+        }
+        catch (Exception ex)
+        {
+            _output.WriteLine($"  FAILED: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        // 2b. TFDIR INCLUDE field
+        _output.WriteLine("\n=== 2b. TFDIR INCLUDE field ===");
+        try
+        {
+            using var rfcRead = conn.CreateFunction("RFC_READ_TABLE");
+            var output = rfcRead.Invoke<Extractors.RfcReadTableOutput>(new Extractors.RfcReadTableInput
+            {
+                QueryTable = "TFDIR",
+                Delimiter = "|",
+                Fields = [new Extractors.RfcTableField { FieldName = "INCLUDE" }],
+                Options = [new Extractors.RfcReadTableOption { Text = $"FUNCNAME = '{funcName}'" }],
+            });
+            var data = output.Data ?? [];
+            _output.WriteLine($"  rows: {data.Length}");
+            if (data.Length > 0)
+            {
+                include = data[0].Wa.Trim();
+                _output.WriteLine($"  INCLUDE: '{include}'");
+            }
+        }
+        catch (Exception ex)
+        {
+            _output.WriteLine($"  FAILED: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        // 3. ENLFDIR lookup
+        _output.WriteLine("\n=== 3. ENLFDIR lookup ===");
+        try
+        {
+            using var rfcRead = conn.CreateFunction("RFC_READ_TABLE");
+            var output = rfcRead.Invoke<Extractors.RfcReadTableOutput>(new Extractors.RfcReadTableInput
+            {
+                QueryTable = "ENLFDIR",
+                Delimiter = "|",
+                Fields = [
+                    new Extractors.RfcTableField { FieldName = "AREA" },
+                    new Extractors.RfcTableField { FieldName = "INCLUDE" },
+                ],
+                Options = [new Extractors.RfcReadTableOption { Text = $"FUNCNAME = '{funcName}'" }],
+            });
+            var data = output.Data ?? [];
+            var fields = output.Fields ?? [];
+            _output.WriteLine($"  ENLFDIR rows: {data.Length}");
+            _output.WriteLine($"  Fields: {string.Join(", ", fields.Select(f => f.FieldName.Trim()))}");
+            if (data.Length > 0)
+            {
+                _output.WriteLine($"  DATA[0]: '{data[0].Wa}'");
+                var parts = data[0].Wa.Split('|');
+                if (parts.Length >= 2)
+                {
+                    var area = parts[0].Trim();
+                    include = parts[1].Trim();
+                    _output.WriteLine($"  AREA='{area}', INCLUDE='{include}'");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _output.WriteLine($"  FAILED: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        // 4. RFC_READ_REPORT with include name
+        if (!string.IsNullOrEmpty(include))
+        {
+            _output.WriteLine($"\n=== 4. RFC_READ_REPORT include='{include}' ===");
+            try
+            {
+                using var readReport = conn.CreateFunction("RFC_READ_REPORT");
+                var output = readReport.Invoke<Extractors.ReadReportOutput>(
+                    new Extractors.ReadReportInput { ProgramName = include });
+                var lines = output.Source ?? [];
+                _output.WriteLine($"  REPORT_TAB lines: {lines.Length}");
+                foreach (var l in lines.Take(10))
+                    _output.WriteLine($"    '{l.Line}'");
+            }
+            catch (Exception ex)
+            {
+                _output.WriteLine($"  FAILED: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+        else
+        {
+            _output.WriteLine("\n=== 4. RFC_READ_REPORT — skipped (no include found) ===");
+        }
+
+        // 5. Try the full extraction with RPY_FUNCTIONMODULE_READ_NEW + StringTableReader
+        _output.WriteLine("\n=== 5. RPY_FUNCTIONMODULE_READ_NEW + SapRfcStringTableReader ===");
+        try
+        {
+            using var rpyNew = conn.CreateFunction("RPY_FUNCTIONMODULE_READ_NEW");
+            rpyNew.Invoke(new Extractors.RpyFuncReadInput { FunctionName = funcName });
+
+            var lines = Extractors.SapRfcStringTableReader.ReadStringTable(rpyNew, "NEW_SOURCE");
+            _output.WriteLine($"  Lines: {lines?.Count ?? -1}");
+            if (lines is { Count: > 0 })
+            {
+                foreach (var l in lines.Take(15))
+                    _output.WriteLine($"    '{l}'");
+            }
+            else
+            {
+                _output.WriteLine("  (empty or null)");
+            }
+        }
+        catch (Exception ex)
+        {
+            _output.WriteLine($"  FAILED: {ex.GetType().Name}: {ex.Message}");
+            if (ex.InnerException is not null)
+                _output.WriteLine($"    Inner: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
+        }
+
+        _output.WriteLine("\n=== Diagnostic complete ===");
     }
 
     private sealed class TestProgress : IProgress<ImportProgress>
