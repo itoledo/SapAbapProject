@@ -38,3 +38,6 @@ testsettings.local.json
 
 ## MCP server config: contains plaintext SAP credentials
 .mcp.json
+
+## SAP env-var script: contains plaintext SAP credentials (commit only the .example)
+scripts/sap-env.ps1
