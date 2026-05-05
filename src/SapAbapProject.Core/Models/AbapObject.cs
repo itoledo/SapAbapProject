@@ -8,6 +8,7 @@ public sealed record AbapObject
     public string? FunctionGroup { get; init; }
     public string? Description { get; init; }
     public required string SourceCode { get; init; }
+    public AbapObjectMetadata? Metadata { get; init; }
 
     public string FolderName => ObjectType switch
     {

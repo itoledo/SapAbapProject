@@ -8,11 +8,23 @@ namespace SapAbapProject.RfcExtractor;
 public sealed class AbapObjectExtractor : IAbapExtractor
 {
     private readonly SapConnectionSettings _settings;
+    private readonly IReadOnlyList<string> _descriptionLanguages;
+    private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private SapConnection? _connection;
+
+    private FunctionModuleExtractor? _fmExtractor;
+    private DataElementExtractor? _dtelExtractor;
+    private DomainExtractor? _domaExtractor;
+    private TableDefinitionExtractor? _tableExtractor;
+    private TableDefinitionExtractor? _structureExtractor;
+    private TableTypeExtractor? _ttypExtractor;
 
     public AbapObjectExtractor(SapConnectionSettings settings)
     {
         _settings = settings;
+        _descriptionLanguages = settings.DescriptionLanguages is { Count: > 0 }
+            ? settings.DescriptionLanguages.Select(SapLanguageCode.Resolve).Distinct().ToList()
+            : SapLanguageCode.DefaultCascade(settings.Language);
     }
 
     private SapConnection EnsureConnection()
@@ -59,73 +71,188 @@ public sealed class AbapObjectExtractor : IAbapExtractor
         return _connection;
     }
 
+    private FunctionModuleExtractor FunctionModule => _fmExtractor ??= new FunctionModuleExtractor(EnsureConnection(), _descriptionLanguages);
+    private DataElementExtractor DataElement => _dtelExtractor ??= new DataElementExtractor(EnsureConnection(), _descriptionLanguages);
+    private DomainExtractor Domain => _domaExtractor ??= new DomainExtractor(EnsureConnection(), _descriptionLanguages);
+    private TableDefinitionExtractor Table => _tableExtractor ??= TableDefinitionExtractor.ForTables(EnsureConnection(), _descriptionLanguages);
+    private TableDefinitionExtractor Structure => _structureExtractor ??= TableDefinitionExtractor.ForStructures(EnsureConnection(), _descriptionLanguages);
+    private TableTypeExtractor TableType => _ttypExtractor ??= new TableTypeExtractor(EnsureConnection(), _descriptionLanguages);
+
     public async Task TestConnectionAsync(CancellationToken cancellationToken = default)
     {
-        await Task.Run(() =>
+        await _connectionLock.WaitAsync(cancellationToken);
+        try
         {
-            var conn = EnsureConnection();
-            using var func = conn.CreateFunction("RFC_PING");
-            func.Invoke();
-        }, cancellationToken);
+            await Task.Run(() =>
+            {
+                var conn = EnsureConnection();
+                using var func = conn.CreateFunction("RFC_PING");
+                func.Invoke();
+            }, cancellationToken);
+        }
+        finally { _connectionLock.Release(); }
     }
 
     public async Task<IReadOnlyList<string>> GetPackagesAsync(
         string searchPattern = "*",
         CancellationToken cancellationToken = default)
     {
-        return await Task.Run(() =>
+        await _connectionLock.WaitAsync(cancellationToken);
+        try
         {
-            var conn = EnsureConnection();
-            using var func = conn.CreateFunction("RFC_READ_TABLE");
-            var where = $"DEVCLASS LIKE '{searchPattern.Replace('*', '%')}'";
-            var output = func.Invoke<RfcReadTableOutput>(new RfcReadTableInput
+            return await Task.Run(() =>
             {
-                QueryTable = "TDEVC",
-                Delimiter = "|",
-                RowCount = 500,
-                Fields = [new RfcTableField { FieldName = "DEVCLASS" }],
-                Options = [new RfcReadTableOption { Text = where }],
-            });
+                var conn = EnsureConnection();
+                using var func = conn.CreateFunction("RFC_READ_TABLE");
+                var where = $"DEVCLASS LIKE '{searchPattern.Replace('*', '%')}'";
+                var output = func.Invoke<RfcReadTableOutput>(new RfcReadTableInput
+                {
+                    QueryTable = "TDEVC",
+                    Delimiter = "|",
+                    RowCount = 500,
+                    Fields = [new RfcTableField { FieldName = "DEVCLASS" }],
+                    Options = [new RfcReadTableOption { Text = where }],
+                });
 
-            var data = output.Data ?? [];
-            return (IReadOnlyList<string>)data
-                .Select(r => r.Wa.Trim())
-                .Where(s => !string.IsNullOrEmpty(s))
-                .OrderBy(s => s)
-                .ToList();
-        }, cancellationToken);
+                var data = output.Data ?? [];
+                return (IReadOnlyList<string>)data
+                    .Select(r => r.Wa.Trim())
+                    .Where(s => !string.IsNullOrEmpty(s))
+                    .OrderBy(s => s)
+                    .ToList();
+            }, cancellationToken);
+        }
+        finally { _connectionLock.Release(); }
     }
 
     public async Task<IReadOnlyList<string>> GetFunctionGroupsAsync(
         string? packageFilter = null,
         CancellationToken cancellationToken = default)
     {
-        return await Task.Run(() =>
+        await _connectionLock.WaitAsync(cancellationToken);
+        try
         {
-            var conn = EnsureConnection();
-            using var func = conn.CreateFunction("RFC_READ_TABLE");
-
-            // Use TADIR to find function groups - TLIBG doesn't have DEVCLASS
-            var where = string.IsNullOrEmpty(packageFilter)
-                ? "PGMID = 'R3TR' AND OBJECT = 'FUGR'"
-                : $"PGMID = 'R3TR' AND OBJECT = 'FUGR' AND DEVCLASS = '{packageFilter}'";
-
-            var output = func.Invoke<RfcReadTableOutput>(new RfcReadTableInput
+            return await Task.Run(() =>
             {
-                QueryTable = "TADIR",
-                Delimiter = "|",
-                RowCount = 1000,
-                Fields = [new RfcTableField { FieldName = "OBJ_NAME" }],
-                Options = [new RfcReadTableOption { Text = where }],
-            });
+                var conn = EnsureConnection();
+                using var func = conn.CreateFunction("RFC_READ_TABLE");
 
-            var data = output.Data ?? [];
-            return (IReadOnlyList<string>)data
-                .Select(r => r.Wa.Trim())
-                .Where(s => !string.IsNullOrEmpty(s))
-                .OrderBy(s => s)
-                .ToList();
-        }, cancellationToken);
+                var where = string.IsNullOrEmpty(packageFilter)
+                    ? "PGMID = 'R3TR' AND OBJECT = 'FUGR'"
+                    : $"PGMID = 'R3TR' AND OBJECT = 'FUGR' AND DEVCLASS = '{packageFilter}'";
+
+                var output = func.Invoke<RfcReadTableOutput>(new RfcReadTableInput
+                {
+                    QueryTable = "TADIR",
+                    Delimiter = "|",
+                    RowCount = 1000,
+                    Fields = [new RfcTableField { FieldName = "OBJ_NAME" }],
+                    Options = [new RfcReadTableOption { Text = where }],
+                });
+
+                var data = output.Data ?? [];
+                return (IReadOnlyList<string>)data
+                    .Select(r => r.Wa.Trim())
+                    .Where(s => !string.IsNullOrEmpty(s))
+                    .OrderBy(s => s)
+                    .ToList();
+            }, cancellationToken);
+        }
+        finally { _connectionLock.Release(); }
+    }
+
+    public async Task<IReadOnlyList<AbapObjectSummary>> ListFunctionModulesAsync(
+        string? namePattern = null,
+        string? packageFilter = null,
+        string? functionGroupFilter = null,
+        int maxRows = 1000,
+        CancellationToken cancellationToken = default)
+    {
+        await _connectionLock.WaitAsync(cancellationToken);
+        try
+        {
+            return await FunctionModule.ListAsync(namePattern, packageFilter, functionGroupFilter, maxRows, cancellationToken);
+        }
+        finally { _connectionLock.Release(); }
+    }
+
+    public async Task<IReadOnlyList<AbapObjectSummary>> ListTablesAsync(
+        string? namePattern = null,
+        string? packageFilter = null,
+        bool includeStructures = false,
+        int maxRows = 1000,
+        CancellationToken cancellationToken = default)
+    {
+        await _connectionLock.WaitAsync(cancellationToken);
+        try
+        {
+            var tables = await Table.ListAsync(namePattern, packageFilter, maxRows, cancellationToken);
+            if (!includeStructures) return tables;
+
+            var structures = await Structure.ListAsync(namePattern, packageFilter, maxRows, cancellationToken);
+            return tables.Concat(structures).ToList();
+        }
+        finally { _connectionLock.Release(); }
+    }
+
+    public async Task<AbapObject?> GetFunctionModuleAsync(string name, CancellationToken cancellationToken = default)
+    {
+        await _connectionLock.WaitAsync(cancellationToken);
+        try { return await FunctionModule.ExtractByNameAsync(name, cancellationToken); }
+        finally { _connectionLock.Release(); }
+    }
+
+    public async Task<AbapObject?> GetTableAsync(string name, CancellationToken cancellationToken = default)
+    {
+        await _connectionLock.WaitAsync(cancellationToken);
+        try { return await Table.ExtractByNameAsync(name, cancellationToken); }
+        finally { _connectionLock.Release(); }
+    }
+
+    public async Task<AbapObject?> GetStructureAsync(string name, CancellationToken cancellationToken = default)
+    {
+        await _connectionLock.WaitAsync(cancellationToken);
+        try { return await Structure.ExtractByNameAsync(name, cancellationToken); }
+        finally { _connectionLock.Release(); }
+    }
+
+    public async Task<AbapObject?> GetDataElementAsync(string name, CancellationToken cancellationToken = default)
+    {
+        await _connectionLock.WaitAsync(cancellationToken);
+        try { return await DataElement.ExtractByNameAsync(name, cancellationToken); }
+        finally { _connectionLock.Release(); }
+    }
+
+    public async Task<AbapObject?> GetDomainAsync(string name, CancellationToken cancellationToken = default)
+    {
+        await _connectionLock.WaitAsync(cancellationToken);
+        try { return await Domain.ExtractByNameAsync(name, cancellationToken); }
+        finally { _connectionLock.Release(); }
+    }
+
+    public async Task<AbapObject?> GetTableTypeAsync(string name, CancellationToken cancellationToken = default)
+    {
+        await _connectionLock.WaitAsync(cancellationToken);
+        try { return await TableType.ExtractByNameAsync(name, cancellationToken); }
+        finally { _connectionLock.Release(); }
+    }
+
+    public async Task<TableReadResult> ReadTableAsync(
+        string tableName,
+        IReadOnlyList<string> fields,
+        string? whereClause = null,
+        int maxRows = 100,
+        CancellationToken cancellationToken = default)
+    {
+        await _connectionLock.WaitAsync(cancellationToken);
+        try
+        {
+            EnsureConnection();
+            return await Task.Run(
+                () => Table.ReadTableWithMetadata(tableName, fields, whereClause, maxRows),
+                cancellationToken);
+        }
+        finally { _connectionLock.Release(); }
     }
 
     public async Task<IReadOnlyList<AbapObject>> ExtractObjectsAsync(
@@ -133,70 +260,75 @@ public sealed class AbapObjectExtractor : IAbapExtractor
         IProgress<ImportProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var conn = EnsureConnection();
-
-        var extractors = new List<IObjectExtractor>();
-        foreach (var objectType in options.ObjectTypes)
+        await _connectionLock.WaitAsync(cancellationToken);
+        try
         {
-            var extractor = CreateExtractor(objectType, conn);
-            if (extractor is not null)
-                extractors.Add(extractor);
-        }
+            var conn = EnsureConnection();
 
-        var allObjects = new List<AbapObject>();
-        int totalTypes = extractors.Count;
-        int processed = 0;
-
-        foreach (var extractor in extractors)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            progress?.Report(new ImportProgress
+            var extractors = new List<IObjectExtractor>();
+            foreach (var objectType in options.ObjectTypes)
             {
-                CurrentObject = $"Extracting {extractor.ObjectType}...",
-                ObjectType = extractor.ObjectType,
-                ProcessedCount = processed,
-                TotalCount = totalTypes,
-            });
+                var extractor = CreateExtractor(objectType, conn);
+                if (extractor is not null)
+                    extractors.Add(extractor);
+            }
 
-            try
+            var allObjects = new List<AbapObject>();
+            int totalTypes = extractors.Count;
+            int processed = 0;
+
+            foreach (var extractor in extractors)
             {
-                var objects = await extractor.ExtractAsync(options, cancellationToken);
-                allObjects.AddRange(objects);
+                cancellationToken.ThrowIfCancellationRequested();
 
                 progress?.Report(new ImportProgress
                 {
-                    CurrentObject = $"Extracted {objects.Count} {extractor.ObjectType} objects",
+                    CurrentObject = $"Extracting {extractor.ObjectType}...",
                     ObjectType = extractor.ObjectType,
-                    ProcessedCount = ++processed,
+                    ProcessedCount = processed,
                     TotalCount = totalTypes,
                 });
-            }
-            catch (Exception ex)
-            {
-                progress?.Report(new ImportProgress
-                {
-                    CurrentObject = $"Error extracting {extractor.ObjectType}: {ex.Message}",
-                    ObjectType = extractor.ObjectType,
-                    ProcessedCount = ++processed,
-                    TotalCount = totalTypes,
-                    IsError = true,
-                    ErrorMessage = ex.Message,
-                });
-            }
-        }
 
-        return allObjects;
+                try
+                {
+                    var objects = await extractor.ExtractAsync(options, cancellationToken);
+                    allObjects.AddRange(objects);
+
+                    progress?.Report(new ImportProgress
+                    {
+                        CurrentObject = $"Extracted {objects.Count} {extractor.ObjectType} objects",
+                        ObjectType = extractor.ObjectType,
+                        ProcessedCount = ++processed,
+                        TotalCount = totalTypes,
+                    });
+                }
+                catch (Exception ex)
+                {
+                    progress?.Report(new ImportProgress
+                    {
+                        CurrentObject = $"Error extracting {extractor.ObjectType}: {ex.Message}",
+                        ObjectType = extractor.ObjectType,
+                        ProcessedCount = ++processed,
+                        TotalCount = totalTypes,
+                        IsError = true,
+                        ErrorMessage = ex.Message,
+                    });
+                }
+            }
+
+            return allObjects;
+        }
+        finally { _connectionLock.Release(); }
     }
 
-    private static IObjectExtractor? CreateExtractor(AbapObjectType type, SapConnection conn) => type switch
+    private IObjectExtractor? CreateExtractor(AbapObjectType type, SapConnection conn) => type switch
     {
-        AbapObjectType.FunctionModule => new FunctionModuleExtractor(conn),
-        AbapObjectType.DataElement => new DataElementExtractor(conn),
-        AbapObjectType.Domain => new DomainExtractor(conn),
-        AbapObjectType.TransparentTable => TableDefinitionExtractor.ForTables(conn),
-        AbapObjectType.Structure => TableDefinitionExtractor.ForStructures(conn),
-        AbapObjectType.TableType => new TableTypeExtractor(conn),
+        AbapObjectType.FunctionModule => FunctionModule,
+        AbapObjectType.DataElement => DataElement,
+        AbapObjectType.Domain => Domain,
+        AbapObjectType.TransparentTable => Table,
+        AbapObjectType.Structure => Structure,
+        AbapObjectType.TableType => TableType,
         _ => null,
     };
 
@@ -204,5 +336,6 @@ public sealed class AbapObjectExtractor : IAbapExtractor
     {
         _connection?.Dispose();
         _connection = null;
+        _connectionLock.Dispose();
     }
 }

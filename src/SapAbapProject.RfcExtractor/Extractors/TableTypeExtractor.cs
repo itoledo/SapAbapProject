@@ -5,9 +5,20 @@ namespace SapAbapProject.RfcExtractor.Extractors;
 
 internal sealed class TableTypeExtractor : BaseExtractor
 {
-    public TableTypeExtractor(SapConnection connection) : base(connection) { }
+    public TableTypeExtractor(SapConnection connection, IReadOnlyList<string>? descriptionLanguages = null)
+        : base(connection, descriptionLanguages) { }
 
     public override AbapObjectType ObjectType => AbapObjectType.TableType;
+
+    /// <summary>Extracts a single table type by name.</summary>
+    internal Task<AbapObject?> ExtractByNameAsync(string name, CancellationToken cancellationToken = default) =>
+        Task.Run(() =>
+        {
+            var tadir = ReadTable("TADIR", ["DEVCLASS"],
+                $"PGMID = 'R3TR' AND OBJECT = 'TTYP' AND OBJ_NAME = '{name}'");
+            var package = tadir.Count > 0 ? tadir[0]["DEVCLASS"].Trim() : "";
+            return ExtractTableType(name, package);
+        }, cancellationToken);
 
     public override async Task<IReadOnlyList<AbapObject>> ExtractAsync(
         ImportOptions options,
@@ -64,8 +75,8 @@ internal sealed class TableTypeExtractor : BaseExtractor
 
         // Description
         string? description = null;
-        var dd40t = ReadTable("DD40T", ["DDTEXT"],
-            $"TYPENAME = '{name}' AND DDLANGUAGE = 'E' AND AS4LOCAL = 'A'");
+        var dd40t = ReadTableInLanguages("DD40T", ["DDTEXT"],
+            $"TYPENAME = '{name}' AND AS4LOCAL = 'A'", "DDLANGUAGE");
         if (dd40t.Count > 0)
             description = dd40t[0].GetValueOrDefault("DDTEXT", "").Trim();
 
@@ -90,6 +101,7 @@ internal sealed class TableTypeExtractor : BaseExtractor
         sb.AppendLine($"  ACCESS-MODE: {accessDesc}.");
 
         // Key components
+        var keyFields = new List<string>();
         if (keyDef == "K")
         {
             var dd42v = ReadTable("DD42V",
@@ -100,7 +112,11 @@ internal sealed class TableTypeExtractor : BaseExtractor
             {
                 sb.AppendLine($"  KEY:");
                 foreach (var kf in dd42v)
-                    sb.AppendLine($"    {kf["KEYFIELD"].Trim()}.");
+                {
+                    var keyField = kf["KEYFIELD"].Trim();
+                    keyFields.Add(keyField);
+                    sb.AppendLine($"    {keyField}.");
+                }
             }
         }
 
@@ -110,9 +126,10 @@ internal sealed class TableTypeExtractor : BaseExtractor
         {
             Name = name,
             ObjectType = AbapObjectType.TableType,
-            PackageName = package,
+            PackageName = string.IsNullOrEmpty(package) ? null : package,
             Description = description,
             SourceCode = sb.ToString(),
+            Metadata = new TableTypeMetadata(rowType, accessDesc, keyFields),
         };
     }
 }

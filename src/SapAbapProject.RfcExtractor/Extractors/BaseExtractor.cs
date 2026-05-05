@@ -7,10 +7,34 @@ namespace SapAbapProject.RfcExtractor.Extractors;
 internal abstract class BaseExtractor : IObjectExtractor
 {
     protected readonly SapConnection Connection;
+    protected readonly IReadOnlyList<string> DescriptionLanguages;
 
-    protected BaseExtractor(SapConnection connection)
+    protected BaseExtractor(SapConnection connection, IReadOnlyList<string>? descriptionLanguages = null)
     {
         Connection = connection;
+        DescriptionLanguages = descriptionLanguages is { Count: > 0 } ? descriptionLanguages : new[] { "E" };
+    }
+
+    /// <summary>
+    /// Reads description rows trying each configured language in order. Returns
+    /// the first non-empty result, or an empty list if none of the languages match.
+    /// </summary>
+    protected IReadOnlyList<Dictionary<string, string>> ReadTableInLanguages(
+        string tableName,
+        string[] fields,
+        string baseWhere,
+        string languageField,
+        int maxRows = 10000)
+    {
+        foreach (var lang in DescriptionLanguages)
+        {
+            var where = string.IsNullOrEmpty(baseWhere)
+                ? $"{languageField} = '{lang}'"
+                : $"{baseWhere} AND {languageField} = '{lang}'";
+            var rows = ReadTable(tableName, fields, where, maxRows);
+            if (rows.Count > 0) return rows;
+        }
+        return Array.Empty<Dictionary<string, string>>();
     }
 
     public abstract AbapObjectType ObjectType { get; }
@@ -21,12 +45,14 @@ internal abstract class BaseExtractor : IObjectExtractor
 
     /// <summary>
     /// Calls RFC_READ_TABLE to read rows from an SAP table with optional filter.
+    /// Default <paramref name="maxRows"/> is 10000 — some SAP systems interpret
+    /// <c>ROWCOUNT=0</c> as "return zero rows" rather than "no limit".
     /// </summary>
     protected IReadOnlyList<Dictionary<string, string>> ReadTable(
         string tableName,
         string[] fields,
         string? whereClause = null,
-        int maxRows = 0)
+        int maxRows = 10000)
     {
         using var function = Connection.CreateFunction("RFC_READ_TABLE");
         var output = function.Invoke<RfcReadTableOutput>(new RfcReadTableInput
@@ -55,6 +81,54 @@ internal abstract class BaseExtractor : IObjectExtractor
             result.Add(dict);
         }
         return result;
+    }
+
+    /// <summary>
+    /// Calls RFC_READ_TABLE and returns both the field metadata and the rows.
+    /// Used by the public ReadTableAsync escape hatch.
+    /// </summary>
+    internal TableReadResult ReadTableWithMetadata(
+        string tableName,
+        IReadOnlyList<string> fields,
+        string? whereClause,
+        int maxRows)
+    {
+        using var function = Connection.CreateFunction("RFC_READ_TABLE");
+        var output = function.Invoke<RfcReadTableOutput>(new RfcReadTableInput
+        {
+            QueryTable = tableName,
+            Delimiter = "|",
+            RowCount = maxRows,
+            Fields = fields.Select(f => new RfcTableField { FieldName = f }).ToArray(),
+            Options = string.IsNullOrEmpty(whereClause)
+                ? []
+                : SplitWhereClause(whereClause!),
+        });
+
+        var data = output.Data ?? [];
+        var fieldList = output.Fields ?? [];
+
+        var fieldInfos = fieldList.Select(f => new TableReadField(
+            Name: f.FieldName.Trim(),
+            Type: f.Type.Trim(),
+            Length: int.TryParse(f.Length.Trim(), out var len) ? len : 0,
+            Offset: int.TryParse(f.Offset.Trim(), out var off) ? off : 0,
+            Description: string.IsNullOrWhiteSpace(f.FieldText) ? null : f.FieldText.Trim()
+        )).ToList();
+
+        var rows = new List<IReadOnlyDictionary<string, string>>();
+        foreach (var row in data)
+        {
+            var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var values = row.Wa.Split('|');
+            for (int i = 0; i < fieldInfos.Count && i < values.Length; i++)
+            {
+                dict[fieldInfos[i].Name] = values[i].Trim();
+            }
+            rows.Add(dict);
+        }
+
+        return new TableReadResult(fieldInfos, rows);
     }
 
     /// <summary>

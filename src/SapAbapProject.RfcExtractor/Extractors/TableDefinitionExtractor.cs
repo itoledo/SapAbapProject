@@ -7,19 +7,82 @@ internal sealed class TableDefinitionExtractor : BaseExtractor
 {
     private readonly AbapObjectType _objectType;
 
-    private TableDefinitionExtractor(SapConnection connection, AbapObjectType objectType)
-        : base(connection)
+    private TableDefinitionExtractor(SapConnection connection, AbapObjectType objectType, IReadOnlyList<string>? descriptionLanguages)
+        : base(connection, descriptionLanguages)
     {
         _objectType = objectType;
     }
 
-    public static TableDefinitionExtractor ForTables(SapConnection connection) =>
-        new(connection, AbapObjectType.TransparentTable);
+    public static TableDefinitionExtractor ForTables(SapConnection connection, IReadOnlyList<string>? descriptionLanguages = null) =>
+        new(connection, AbapObjectType.TransparentTable, descriptionLanguages);
 
-    public static TableDefinitionExtractor ForStructures(SapConnection connection) =>
-        new(connection, AbapObjectType.Structure);
+    public static TableDefinitionExtractor ForStructures(SapConnection connection, IReadOnlyList<string>? descriptionLanguages = null) =>
+        new(connection, AbapObjectType.Structure, descriptionLanguages);
 
     public override AbapObjectType ObjectType => _objectType;
+
+    /// <summary>Extracts a single table or structure by name. Auto-detects type and looks up package.</summary>
+    internal Task<AbapObject?> ExtractByNameAsync(string name, CancellationToken cancellationToken = default) =>
+        Task.Run(() =>
+        {
+            var tabClass = _objectType == AbapObjectType.TransparentTable ? "TRANSP" : "INTTAB";
+            var dd02l = ReadTable("DD02L",
+                ["TABCLASS"],
+                $"TABNAME = '{name}' AND AS4LOCAL = 'A' AND TABCLASS = '{tabClass}'");
+            if (dd02l.Count == 0)
+                return null;
+
+            var tadirObject = "TABL";
+            var tadir = ReadTable("TADIR", ["DEVCLASS"],
+                $"PGMID = 'R3TR' AND OBJECT = '{tadirObject}' AND OBJ_NAME = '{name}'");
+            var package = tadir.Count > 0 ? tadir[0]["DEVCLASS"].Trim() : "";
+
+            return ExtractTableDefinition(name, package, tabClass);
+        }, cancellationToken);
+
+    /// <summary>
+    /// Lists tables (or structures) matching a name pattern, optionally filtered by package.
+    /// </summary>
+    internal Task<IReadOnlyList<AbapObjectSummary>> ListAsync(
+        string? namePattern,
+        string? packageFilter,
+        int maxRows,
+        CancellationToken cancellationToken = default) =>
+        Task.Run<IReadOnlyList<AbapObjectSummary>>(() =>
+        {
+            var tabClass = _objectType == AbapObjectType.TransparentTable ? "TRANSP" : "INTTAB";
+            var conditions = new List<string> { $"TABCLASS = '{tabClass}'", "AS4LOCAL = 'A'" };
+            if (!string.IsNullOrEmpty(namePattern))
+                conditions.Add($"TABNAME LIKE '{namePattern!.Replace('*', '%')}'");
+
+            var rows = ReadTable("DD02L", ["TABNAME"], string.Join(" AND ", conditions), maxRows);
+
+            var results = new List<AbapObjectSummary>();
+            foreach (var row in rows)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var name = row["TABNAME"].Trim();
+                if (string.IsNullOrEmpty(name)) continue;
+
+                var tadir = ReadTable("TADIR", ["DEVCLASS"],
+                    $"PGMID = 'R3TR' AND OBJECT = 'TABL' AND OBJ_NAME = '{name}'");
+                var package = tadir.Count > 0 ? tadir[0]["DEVCLASS"].Trim() : null;
+
+                if (!string.IsNullOrEmpty(packageFilter) &&
+                    !string.Equals(package, packageFilter, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string? description = null;
+                var dd02t = ReadTableInLanguages("DD02T", ["DDTEXT"],
+                    $"TABNAME = '{name}' AND AS4LOCAL = 'A'", "DDLANGUAGE");
+                if (dd02t.Count > 0)
+                    description = dd02t[0].GetValueOrDefault("DDTEXT", "").Trim();
+
+                results.Add(new AbapObjectSummary(name, _objectType, package, null, description));
+            }
+
+            return results;
+        }, cancellationToken);
 
     public override async Task<IReadOnlyList<AbapObject>> ExtractAsync(
         ImportOptions options,
@@ -73,8 +136,8 @@ internal sealed class TableDefinitionExtractor : BaseExtractor
     {
         // Description
         string? description = null;
-        var dd02t = ReadTable("DD02T", ["DDTEXT"],
-            $"TABNAME = '{name}' AND DDLANGUAGE = 'E' AND AS4LOCAL = 'A'");
+        var dd02t = ReadTableInLanguages("DD02T", ["DDTEXT"],
+            $"TABNAME = '{name}' AND AS4LOCAL = 'A'", "DDLANGUAGE");
         if (dd02t.Count > 0)
             description = dd02t[0].GetValueOrDefault("DDTEXT", "").Trim();
 
@@ -143,13 +206,29 @@ internal sealed class TableDefinitionExtractor : BaseExtractor
 
         sb.AppendLine($"END-{keyword}.");
 
+        var fields = sortedFields.Select(f => new TableField(
+            Name: f["FIELDNAME"].Trim(),
+            Position: int.TryParse(f.GetValueOrDefault("POSITION", "0").Trim(), out var p) ? p : 0,
+            IsKey: f.GetValueOrDefault("KEYFLAG", "").Trim() == "X",
+            DataElement: string.IsNullOrWhiteSpace(f.GetValueOrDefault("ROLLNAME", "")) ? null : f["ROLLNAME"].Trim(),
+            DataType: string.IsNullOrWhiteSpace(f.GetValueOrDefault("DATATYPE", "")) ? null : f["DATATYPE"].Trim(),
+            Length: string.IsNullOrWhiteSpace(f.GetValueOrDefault("LENG", "")) ? null : f["LENG"].Trim(),
+            Decimals: string.IsNullOrWhiteSpace(f.GetValueOrDefault("DECIMALS", "")) ? null : f["DECIMALS"].Trim(),
+            NotNull: f.GetValueOrDefault("NOTNULL", "").Trim() == "X"
+        )).ToList();
+
+        AbapObjectMetadata metadata = _objectType == AbapObjectType.TransparentTable
+            ? new TableMetadata(tabClass, fields, keyFields.Select(k => k["FIELDNAME"].Trim()).ToList())
+            : new StructureMetadata(fields);
+
         return new AbapObject
         {
             Name = name,
             ObjectType = _objectType,
-            PackageName = package,
+            PackageName = string.IsNullOrEmpty(package) ? null : package,
             Description = description,
             SourceCode = sb.ToString(),
+            Metadata = metadata,
         };
     }
 }

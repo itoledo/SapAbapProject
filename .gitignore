@@ -31,7 +31,10 @@ TestResults/
 *.vsix
 
 ## User-specific
-*.pgproj.user
+*.sapproj.user
 
 ## Test settings with credentials (never commit)
 testsettings.local.json
+
+## MCP server config: contains plaintext SAP credentials
+.mcp.json

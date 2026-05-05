@@ -5,9 +5,20 @@ namespace SapAbapProject.RfcExtractor.Extractors;
 
 internal sealed class DomainExtractor : BaseExtractor
 {
-    public DomainExtractor(SapConnection connection) : base(connection) { }
+    public DomainExtractor(SapConnection connection, IReadOnlyList<string>? descriptionLanguages = null)
+        : base(connection, descriptionLanguages) { }
 
     public override AbapObjectType ObjectType => AbapObjectType.Domain;
+
+    /// <summary>Extracts a single domain by name. Looks up package from TADIR.</summary>
+    internal Task<AbapObject?> ExtractByNameAsync(string name, CancellationToken cancellationToken = default) =>
+        Task.Run(() =>
+        {
+            var tadir = ReadTable("TADIR", ["DEVCLASS"],
+                $"PGMID = 'R3TR' AND OBJECT = 'DOMA' AND OBJ_NAME = '{name}'");
+            var package = tadir.Count > 0 ? tadir[0]["DEVCLASS"].Trim() : "";
+            return ExtractDomain(name, package);
+        }, cancellationToken);
 
     public override async Task<IReadOnlyList<AbapObject>> ExtractAsync(
         ImportOptions options,
@@ -64,8 +75,8 @@ internal sealed class DomainExtractor : BaseExtractor
 
         // Description
         string? description = null;
-        var dd01t = ReadTable("DD01T", ["DDTEXT"],
-            $"DOMNAME = '{name}' AND DDLANGUAGE = 'E' AND AS4LOCAL = 'A'");
+        var dd01t = ReadTableInLanguages("DD01T", ["DDTEXT"],
+            $"DOMNAME = '{name}' AND AS4LOCAL = 'A'", "DDLANGUAGE");
         if (dd01t.Count > 0)
             description = dd01t[0].GetValueOrDefault("DDTEXT", "").Trim();
 
@@ -78,9 +89,9 @@ internal sealed class DomainExtractor : BaseExtractor
         var fixedValueTexts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (fixedValues.Count > 0)
         {
-            var dd07t = ReadTable("DD07T",
+            var dd07t = ReadTableInLanguages("DD07T",
                 ["DOMVALUE_L", "DDTEXT"],
-                $"DOMNAME = '{name}' AND DDLANGUAGE = 'E' AND AS4LOCAL = 'A'");
+                $"DOMNAME = '{name}' AND AS4LOCAL = 'A'", "DDLANGUAGE");
             foreach (var fvt in dd07t)
                 fixedValueTexts[fvt["DOMVALUE_L"].Trim()] = fvt.GetValueOrDefault("DDTEXT", "").Trim();
         }
@@ -117,13 +128,32 @@ internal sealed class DomainExtractor : BaseExtractor
 
         sb.AppendLine("END-DOMAIN.");
 
+        var fixedValuesList = fixedValues.Select(fv =>
+        {
+            var low = fv["DOMVALUE_L"].Trim();
+            var high = fv.GetValueOrDefault("DOMVALUE_H", "").Trim();
+            var text = fixedValueTexts.GetValueOrDefault(low, "");
+            return new DomainFixedValue(
+                Low: low,
+                High: string.IsNullOrEmpty(high) ? null : high,
+                Text: string.IsNullOrEmpty(text) ? null : text);
+        }).ToList();
+
+        var metadata = new DomainMetadata(
+            DataType: dataType,
+            Length: string.IsNullOrWhiteSpace(length) ? null : length,
+            Decimals: string.IsNullOrWhiteSpace(decimals) ? null : decimals,
+            OutputLength: string.IsNullOrWhiteSpace(outputLen) ? null : outputLen,
+            FixedValues: fixedValuesList);
+
         return new AbapObject
         {
             Name = name,
             ObjectType = AbapObjectType.Domain,
-            PackageName = package,
+            PackageName = string.IsNullOrEmpty(package) ? null : package,
             Description = description,
             SourceCode = sb.ToString(),
+            Metadata = metadata,
         };
     }
 }

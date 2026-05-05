@@ -5,7 +5,8 @@ namespace SapAbapProject.RfcExtractor.Extractors;
 
 internal sealed class DataElementExtractor : BaseExtractor
 {
-    public DataElementExtractor(SapConnection connection) : base(connection) { }
+    public DataElementExtractor(SapConnection connection, IReadOnlyList<string>? descriptionLanguages = null)
+        : base(connection, descriptionLanguages) { }
 
     public override AbapObjectType ObjectType => AbapObjectType.DataElement;
 
@@ -48,6 +49,21 @@ internal sealed class DataElementExtractor : BaseExtractor
         }, cancellationToken);
     }
 
+    /// <summary>Extracts a single data element by name. Looks up package from TADIR.</summary>
+    internal Task<AbapObject?> ExtractByNameAsync(string name, CancellationToken cancellationToken = default) =>
+        Task.Run(() =>
+        {
+            var package = LookupPackage(name);
+            return ExtractDataElement(name, package ?? "");
+        }, cancellationToken);
+
+    private string? LookupPackage(string dtelName)
+    {
+        var tadir = ReadTable("TADIR", ["DEVCLASS"],
+            $"PGMID = 'R3TR' AND OBJECT = 'DTEL' AND OBJ_NAME = '{dtelName}'");
+        return tadir.Count > 0 ? tadir[0]["DEVCLASS"].Trim() : null;
+    }
+
     private AbapObject? ExtractDataElement(string name, string package)
     {
         // Read main definition from DD04L
@@ -66,9 +82,9 @@ internal sealed class DataElementExtractor : BaseExtractor
 
         // Read description from DD04T
         string? description = null;
-        var dd04t = ReadTable("DD04T",
+        var dd04t = ReadTableInLanguages("DD04T",
             ["DDTEXT", "REPTEXT", "SCRTEXT_S", "SCRTEXT_M", "SCRTEXT_L"],
-            $"ROLLNAME = '{name}' AND DDLANGUAGE = 'E' AND AS4LOCAL = 'A'");
+            $"ROLLNAME = '{name}' AND AS4LOCAL = 'A'", "DDLANGUAGE");
 
         string shortText = "", mediumText = "", longText = "", headingText = "";
         if (dd04t.Count > 0)
@@ -112,13 +128,24 @@ internal sealed class DataElementExtractor : BaseExtractor
             sb.AppendLine($"  FIELD-LABEL HEADING: '{headingText}'.");
         sb.AppendLine($"END-DATA-ELEMENT.");
 
+        var metadata = new DataElementMetadata(
+            Domain: string.IsNullOrWhiteSpace(domainName) ? null : domainName,
+            DataType: string.IsNullOrWhiteSpace(dataType) ? null : dataType,
+            Length: string.IsNullOrWhiteSpace(length) ? null : length,
+            Decimals: string.IsNullOrWhiteSpace(decimals) ? null : decimals,
+            ShortText: string.IsNullOrWhiteSpace(shortText) ? null : shortText,
+            MediumText: string.IsNullOrWhiteSpace(mediumText) ? null : mediumText,
+            LongText: string.IsNullOrWhiteSpace(longText) ? null : longText,
+            HeadingText: string.IsNullOrWhiteSpace(headingText) ? null : headingText);
+
         return new AbapObject
         {
             Name = name,
             ObjectType = AbapObjectType.DataElement,
-            PackageName = package,
+            PackageName = string.IsNullOrEmpty(package) ? null : package,
             Description = description,
             SourceCode = sb.ToString(),
+            Metadata = metadata,
         };
     }
 }

@@ -5,7 +5,8 @@ namespace SapAbapProject.RfcExtractor.Extractors;
 
 internal sealed class FunctionModuleExtractor : BaseExtractor
 {
-    public FunctionModuleExtractor(SapConnection connection) : base(connection) { }
+    public FunctionModuleExtractor(SapConnection connection, IReadOnlyList<string>? descriptionLanguages = null)
+        : base(connection, descriptionLanguages) { }
 
     public override AbapObjectType ObjectType => AbapObjectType.FunctionModule;
 
@@ -22,7 +23,7 @@ internal sealed class FunctionModuleExtractor : BaseExtractor
 
             try
             {
-                var abapObject = await Task.Run(() => ExtractFunctionModule(funcName, options), cancellationToken);
+                var abapObject = await Task.Run(() => ExtractFunctionModule(funcName, options.IncludeSignature), cancellationToken);
                 if (abapObject is not null)
                     results.Add(abapObject);
             }
@@ -34,6 +35,63 @@ internal sealed class FunctionModuleExtractor : BaseExtractor
 
         return results;
     }
+
+    /// <summary>Extracts a single function module by name.</summary>
+    internal Task<AbapObject?> ExtractByNameAsync(string functionName, CancellationToken cancellationToken = default) =>
+        Task.Run(() => ExtractFunctionModule(functionName, includeSignature: true), cancellationToken);
+
+    /// <summary>
+    /// Lists function modules matching the given criteria. Returns lightweight summaries
+    /// without source code — use <see cref="ExtractByNameAsync"/> to fetch full source.
+    /// </summary>
+    internal Task<IReadOnlyList<AbapObjectSummary>> ListAsync(
+        string? namePattern,
+        string? packageFilter,
+        string? functionGroupFilter,
+        int maxRows,
+        CancellationToken cancellationToken = default) =>
+        Task.Run<IReadOnlyList<AbapObjectSummary>>(() =>
+        {
+            var conditions = new List<string>();
+            if (!string.IsNullOrEmpty(namePattern))
+                conditions.Add($"FUNCNAME LIKE '{namePattern!.Replace('*', '%')}'");
+            if (!string.IsNullOrEmpty(functionGroupFilter))
+                conditions.Add($"PNAME = 'SAPL{functionGroupFilter}'");
+
+            var where = conditions.Count > 0 ? string.Join(" AND ", conditions) : null;
+            var rows = ReadTable("TFDIR", ["FUNCNAME", "PNAME"], where, maxRows);
+
+            var results = new List<AbapObjectSummary>();
+            foreach (var row in rows)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var name = row["FUNCNAME"].Trim();
+                var pname = row.GetValueOrDefault("PNAME", "").Trim();
+                var fugr = pname.StartsWith("SAPL", StringComparison.OrdinalIgnoreCase) ? pname.Substring(4) : null;
+
+                string? package = null;
+                if (!string.IsNullOrEmpty(packageFilter) || fugr is not null)
+                {
+                    var devclass = ReadTable("TADIR", ["DEVCLASS"],
+                        $"PGMID = 'R3TR' AND OBJECT = 'FUGR' AND OBJ_NAME = '{fugr}'");
+                    if (devclass.Count > 0)
+                        package = devclass[0]["DEVCLASS"].Trim();
+
+                    if (!string.IsNullOrEmpty(packageFilter) &&
+                        !string.Equals(package, packageFilter, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                }
+
+                string? description = null;
+                var tftit = ReadTableInLanguages("TFTIT", ["STEXT"], $"FUNCNAME = '{name}'", "SPRAS");
+                if (tftit.Count > 0)
+                    description = tftit[0]["STEXT"].Trim();
+
+                results.Add(new AbapObjectSummary(name, AbapObjectType.FunctionModule, package, fugr, description));
+            }
+
+            return results;
+        }, cancellationToken);
 
     private IReadOnlyList<string> SearchFunctionModules(ImportOptions options)
     {
@@ -69,7 +127,7 @@ internal sealed class FunctionModuleExtractor : BaseExtractor
         return results.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    private AbapObject? ExtractFunctionModule(string functionName, ImportOptions options)
+    private AbapObject? ExtractFunctionModule(string functionName, bool includeSignature)
     {
         // Get source code with fallback chain:
         // 1. RPY_FUNCTIONMODULE_READ (works for lines <= 72 chars)
@@ -108,7 +166,7 @@ internal sealed class FunctionModuleExtractor : BaseExtractor
                     packageName = devclass[0]["DEVCLASS"].Trim();
             }
 
-            var tftit = ReadTable("TFTIT", ["STEXT"], $"FUNCNAME = '{functionName}' AND SPRAS = 'E'");
+            var tftit = ReadTableInLanguages("TFTIT", ["STEXT"], $"FUNCNAME = '{functionName}'", "SPRAS");
             if (tftit.Count > 0)
                 description = tftit[0]["STEXT"].Trim();
         }
@@ -117,7 +175,16 @@ internal sealed class FunctionModuleExtractor : BaseExtractor
             // Non-critical metadata
         }
 
-        var header = BuildHeader(functionName, funcGroup, packageName, description, signature, options);
+        var header = BuildHeader(functionName, funcGroup, packageName, description, signature, includeSignature);
+
+        var metadata = new FunctionModuleMetadata(
+            signature.Select(p => new FunctionParameter(
+                Kind: ExpandParameterKind(p.Kind),
+                Name: p.Name,
+                TypeRef: p.TypeRef,
+                DefaultValue: string.IsNullOrWhiteSpace(p.DefaultValue) ? null : p.DefaultValue,
+                Optional: !string.IsNullOrWhiteSpace(p.Optional) && p.Optional.Trim() == "X"
+            )).ToList());
 
         return new AbapObject
         {
@@ -127,8 +194,18 @@ internal sealed class FunctionModuleExtractor : BaseExtractor
             FunctionGroup = funcGroup,
             Description = description,
             SourceCode = header + source,
+            Metadata = metadata,
         };
     }
+
+    private static string ExpandParameterKind(string kind) => kind switch
+    {
+        "I" => "IMPORTING",
+        "E" => "EXPORTING",
+        "C" => "CHANGING",
+        "T" => "TABLES",
+        _ => kind,
+    };
 
     /// <summary>
     /// RPY_FUNCTIONMODULE_READ — available on most SAP systems (used by SE37).
@@ -279,7 +356,7 @@ internal sealed class FunctionModuleExtractor : BaseExtractor
         string? packageName,
         string? description,
         FuncParam[] signature,
-        ImportOptions options)
+        bool includeSignature)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("*----------------------------------------------------------------------*");
@@ -292,7 +369,7 @@ internal sealed class FunctionModuleExtractor : BaseExtractor
             sb.AppendLine($"* Description:     {description}");
         sb.AppendLine($"* Extracted:       {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
 
-        if (options.IncludeSignature && signature.Length > 0)
+        if (includeSignature && signature.Length > 0)
         {
             sb.AppendLine("*----------------------------------------------------------------------*");
             foreach (var kind in new[] { ("I", "IMPORTING"), ("E", "EXPORTING"), ("C", "CHANGING"), ("T", "TABLES") })

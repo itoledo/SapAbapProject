@@ -15,6 +15,14 @@ public sealed record SapConnectionSettings
     public bool UseSncConnection { get; init; }
     public string? SapRouter { get; init; }
 
+    /// <summary>
+    /// SAP DDIC language codes (single-char, e.g. <c>"E"</c>, <c>"S"</c>) tried in order
+    /// when looking up object descriptions. The first language with a non-empty result
+    /// wins. If null, defaults to a cascade derived from <see cref="Language"/> with
+    /// English as the final fallback.
+    /// </summary>
+    public IReadOnlyList<string>? DescriptionLanguages { get; init; }
+
     public Dictionary<string, string> ToRfcParameters()
     {
         var parameters = new Dictionary<string, string>
