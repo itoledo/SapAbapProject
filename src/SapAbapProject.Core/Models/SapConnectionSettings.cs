@@ -12,6 +12,8 @@ public sealed record SapConnectionSettings
     public string? MessageServerHost { get; init; }
     public string? Group { get; init; }
     public string? SncPartnerName { get; init; }
+    public string? SncLibraryPath { get; init; }
+    public string? SncQop { get; init; }
     public bool UseSncConnection { get; init; }
     public string? SapRouter { get; init; }
 
@@ -50,6 +52,10 @@ public sealed record SapConnectionSettings
         {
             parameters["SNC_MODE"] = "1";
             parameters["SNC_PARTNERNAME"] = SncPartnerName!;
+            if (!string.IsNullOrEmpty(SncLibraryPath))
+                parameters["SNC_LIB"] = SncLibraryPath!;
+            if (!string.IsNullOrEmpty(SncQop))
+                parameters["SNC_QOP"] = SncQop!;
         }
 
         if (!string.IsNullOrEmpty(SapRouter))
@@ -58,5 +64,11 @@ public sealed record SapConnectionSettings
         return parameters;
     }
 
-    public string ToDisplayString() => $"{User}@{AppServerHost} [{Client}]";
+    public string ToDisplayString()
+    {
+        var target = !string.IsNullOrEmpty(MessageServerHost)
+            ? $"{SystemId}/{Group}@{MessageServerHost}"
+            : $"{AppServerHost}:{SystemNumber}";
+        return $"{User}@{target} [{Client}]";
+    }
 }

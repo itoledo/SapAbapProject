@@ -1,17 +1,19 @@
 # SAP ABAP MCP Server
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes
-read-only access to a live SAP system via RFC. It lets an LLM agent (Claude Desktop,
-VS Code GitHub Copilot, etc.) query function modules, tables, structures, data
-elements, domains, and table types — and run ad-hoc table reads.
+A [Model Context Protocol](https://modelcontextprotocol.io/) 2.1 server that exposes
+a live SAP system through the SAP NetWeaver RFC SDK. It lets an LLM agent discover
+repository and Dictionary objects, inspect RFC signatures, read ABAP source and
+tables, and execute remote-enabled function modules with structured JSON input and
+output.
 
 This is a thin wrapper over the same `SapAbapProject.RfcExtractor` core that powers
 the Visual Studio extension, so anything you can extract into an `.abap` file you
 can also fetch via these tools.
 
-> **Intended for development environments.** The `sap_read_table` tool is an
-> open escape hatch over `RFC_READ_TABLE` and gives the agent unrestricted read
-> access to any table the SAP user can see. Do not point this at production.
+> **Intended for development environments.** `sap_read_table` can read any table
+> visible to the SAP user. `sap_execute_rfc` can invoke any RFC authorized for that
+> user, including functions that modify business data or commit transactions. Use a
+> dedicated least-privilege SAP account and do not point this server at production.
 
 ## Tools exposed
 
@@ -20,7 +22,13 @@ can also fetch via these tools.
 | `sap_test_connection` | RFC_PING — verify connectivity. |
 | `sap_list_packages` | List `DEVCLASS` matching a wildcard pattern. |
 | `sap_list_function_groups` | List FUGRs, optionally per package. |
-| `sap_list_function_modules` | Search FMs by name pattern / package / function group. |
+| `sap_list_rfcs` | List remote-enabled function modules. |
+| `sap_list_function_modules` | Search all FMs, optionally restricted to RFC-enabled modules. |
+| `sap_get_rfc_definition` | Read live RFC parameter, structure, table, and exception metadata. |
+| `sap_execute_rfc` | Execute an RFC from arbitrary structured JSON parameters. |
+| `sap_list_repository_objects` | Query any TADIR object type such as PROG, CLAS, INTF, FUGR, TABL, or DDLS. |
+| `sap_list_dictionary_object_types` | List supported DDIC categories and TADIR codes. |
+| `sap_list_dictionary_objects` | List tables, structures, views, data elements, domains, table types, search helps, lock objects, type groups, and CDS DDL sources. |
 | `sap_list_tables` | Search transparent tables (and optionally INTTAB structures). |
 | `sap_get_function_module` | Source + structured signature for one FM. |
 | `sap_get_table` | DDL + field metadata for a transparent table. |
@@ -28,10 +36,39 @@ can also fetch via these tools.
 | `sap_get_data_element` | Definition + domain reference + labels. |
 | `sap_get_domain` | Definition + fixed values. |
 | `sap_get_table_type` | Row type + access mode + key fields. |
-| `sap_read_table` | Generic `RFC_READ_TABLE` for ad-hoc reads. |
+| `sap_get_abap_source` | Source for a function module, program, include, or function-group main program. |
+| `sap_read_table` | Paginated `RFC_READ_TABLE` access for ad-hoc reads. |
 
 Object-detail tools return both the rendered ABAP source (`source` field) and a
 structured `metadata` object — pick whichever the agent finds easier to reason about.
+
+## Executing an RFC
+
+First call `sap_get_rfc_definition` so the agent knows the exact parameter names,
+directions, RFC scalar types, structure fields, and table row fields. Then call
+`sap_execute_rfc` with an object such as:
+
+```json
+{
+  "functionName": "BAPI_USER_GET_DETAIL",
+  "parameters": {
+    "USERNAME": "DEVELOPER"
+  },
+  "maxTableRows": 500
+}
+```
+
+Structures are JSON objects and RFC table parameters are arrays of objects. Dates
+accept `yyyyMMdd` or `yyyy-MM-dd`, times accept `HH:mm:ss`, booleans sent to
+character fields become `X`/blank, and binary values are base64. Output table
+parameters are bounded by `maxTableRows`; truncated parameter names are returned in
+`truncatedTableParameters`.
+
+The generic repository catalog intentionally accepts any TADIR object code, while
+the dedicated Dictionary catalog provides friendly names for the most common DDIC
+types. Detailed rendered definitions are currently provided for tables, structures,
+data elements, domains, and table types; other definitions can be queried through
+their standard SAP RFCs using `sap_get_rfc_definition` and `sap_execute_rfc`.
 
 ## Prerequisites
 
@@ -48,7 +85,7 @@ from the agent.
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
 | `SAP_RFC_SDK_PATH` | yes | — | Directory containing `sapnwrfc.dll` and ICU DLLs. |
-| `SAP_HOST` | yes | — | Application server hostname (`ASHOST`). |
+| `SAP_HOST` | conditional | — | Application server hostname for direct logon. |
 | `SAP_USER` | yes | — | SAP user. |
 | `SAP_PASSWORD` | yes | — | SAP password. |
 | `SAP_SYSNR` | no | `00` | System number. |
@@ -56,11 +93,13 @@ from the agent.
 | `SAP_LANGUAGE` | no | `EN` | Logon language (ISO 2-char or SAP 1-char). |
 | `SAP_DESCRIPTION_LANGUAGES` | no | derived from `SAP_LANGUAGE` + `E` fallback | Comma-separated cascade for object descriptions, e.g. `ES,EN`. The first language with a non-empty description wins. ISO 2-char codes are mapped to SAP single-char codes (`ES`→`S`, `EN`→`E`, `DE`→`D`, ...). |
 | `SAP_ROUTER` | no | — | SAProuter string, if needed. |
-| `SAP_MSHOST` | no | — | Message server host (group logon). |
-| `SAP_GROUP` | no | — | Logon group. |
-| `SAP_SYSID` | no | — | System ID, with group logon. |
+| `SAP_MSHOST` | conditional | — | Message server host; requires `SAP_GROUP` and `SAP_SYSID`. |
+| `SAP_GROUP` | conditional | — | Logon group for message-server logon. |
+| `SAP_SYSID` | conditional | — | System ID for message-server logon. |
 | `SAP_SNC_MODE` | no | — | `1` to enable SNC. |
 | `SAP_SNC_PARTNERNAME` | no | — | SNC partner name. |
+| `SAP_SNC_LIB` | no | — | SNC library path, such as `sapcrypto.dll`. |
+| `SAP_SNC_QOP` | no | — | SNC quality of protection agreed with SAP Basis. |
 | `SAP_MCP_LOG_DIR` | no | `%APPDATA%\SapAbapProject\logs` | Where NLog writes the rolling log file. |
 
 ## Running locally

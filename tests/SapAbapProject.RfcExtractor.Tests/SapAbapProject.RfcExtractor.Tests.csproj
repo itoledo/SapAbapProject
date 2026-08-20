@@ -17,8 +17,10 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" />
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
+    <PackageReference Include="NSubstitute" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\SapAbapProject.McpServer\SapAbapProject.McpServer.csproj" />
     <ProjectReference Include="..\..\src\SapAbapProject.RfcExtractor\SapAbapProject.RfcExtractor.csproj" />
   </ItemGroup>
   <ItemGroup>

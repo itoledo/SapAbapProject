@@ -21,32 +21,71 @@ internal static class SapMcpConfiguration
     public const string EnvSystemId = "SAP_SYSID";
     public const string EnvSncMode = "SAP_SNC_MODE";
     public const string EnvSncPartner = "SAP_SNC_PARTNERNAME";
+    public const string EnvSncLibrary = "SAP_SNC_LIB";
+    public const string EnvSncQop = "SAP_SNC_QOP";
     public const string EnvDescriptionLanguages = "SAP_DESCRIPTION_LANGUAGES";
 
     public static string? GetSdkPath() => Environment.GetEnvironmentVariable(EnvSdkPath);
 
     public static SapConnectionSettings BuildConnectionSettings()
     {
-        var host = Require(EnvHost);
+        var host = Environment.GetEnvironmentVariable(EnvHost);
+        var messageHost = Environment.GetEnvironmentVariable(EnvMessageHost);
+        var group = Environment.GetEnvironmentVariable(EnvLogonGroup);
+        var systemId = Environment.GetEnvironmentVariable(EnvSystemId);
+        ValidateConnectionTarget(host, messageHost, group, systemId);
+
         var user = Require(EnvUser);
         var password = Require(EnvPassword);
 
         return new SapConnectionSettings
         {
-            AppServerHost = host,
+            AppServerHost = host ?? string.Empty,
             SystemNumber = Environment.GetEnvironmentVariable(EnvSysNr) ?? "00",
             Client = Environment.GetEnvironmentVariable(EnvClient) ?? "100",
             User = user,
             Password = password,
             Language = Environment.GetEnvironmentVariable(EnvLanguage) ?? "EN",
             SapRouter = Environment.GetEnvironmentVariable(EnvSapRouter),
-            MessageServerHost = Environment.GetEnvironmentVariable(EnvMessageHost),
-            Group = Environment.GetEnvironmentVariable(EnvLogonGroup),
-            SystemId = Environment.GetEnvironmentVariable(EnvSystemId),
+            MessageServerHost = messageHost,
+            Group = group,
+            SystemId = systemId,
             UseSncConnection = string.Equals(Environment.GetEnvironmentVariable(EnvSncMode), "1", StringComparison.Ordinal),
             SncPartnerName = Environment.GetEnvironmentVariable(EnvSncPartner),
+            SncLibraryPath = Environment.GetEnvironmentVariable(EnvSncLibrary),
+            SncQop = Environment.GetEnvironmentVariable(EnvSncQop),
             DescriptionLanguages = ParseDescriptionLanguages(Environment.GetEnvironmentVariable(EnvDescriptionLanguages)),
         };
+    }
+
+    private static void ValidateConnectionTarget(
+        string? host,
+        string? messageHost,
+        string? group,
+        string? systemId)
+    {
+        var usesMessageServer =
+            !string.IsNullOrWhiteSpace(messageHost) ||
+            !string.IsNullOrWhiteSpace(group) ||
+            !string.IsNullOrWhiteSpace(systemId);
+
+        if (usesMessageServer)
+        {
+            if (string.IsNullOrWhiteSpace(messageHost) ||
+                string.IsNullOrWhiteSpace(group) ||
+                string.IsNullOrWhiteSpace(systemId))
+            {
+                throw new InvalidOperationException(
+                    $"{EnvMessageHost}, {EnvLogonGroup}, and {EnvSystemId} must all be set for message-server logon.");
+            }
+
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(host))
+            throw new InvalidOperationException(
+                $"Set {EnvHost} for direct application-server logon, or set " +
+                $"{EnvMessageHost}, {EnvLogonGroup}, and {EnvSystemId} for load-balanced logon.");
     }
 
     private static IReadOnlyList<string>? ParseDescriptionLanguages(string? raw)

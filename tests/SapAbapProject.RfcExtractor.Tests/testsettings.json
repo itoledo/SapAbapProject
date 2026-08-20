@@ -25,5 +25,8 @@
       "Structure",
       "TableType"
     ]
+  },
+  "Rfc": {
+    "PriceConditionsParametersJson": "{}"
   }
 }

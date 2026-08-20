@@ -2,6 +2,9 @@
 
 Tools for working with SAP ABAP source code outside of the SAP GUI.
 
+English is the official language for project documentation, user-facing text,
+issues, pull requests, and future contributions.
+
 This repo contains:
 
 - **`SapAbapProject.Extension`** — A Visual Studio 2022+ extension that defines a
@@ -12,7 +15,8 @@ This repo contains:
 - **`SapAbapProject.McpServer`** — A [Model Context Protocol](https://modelcontextprotocol.io/)
   server that exposes the same SAP-querying capabilities to LLM agents like
   Claude Desktop or GitHub Copilot. See
-  [`src/SapAbapProject.McpServer/README.md`](src/SapAbapProject.McpServer/README.md).
+  [`src/SapAbapProject.McpServer/README.md`](src/SapAbapProject.McpServer/README.md)
+  and [`USAGE.md`](USAGE.md).
 
 Both share a core (`SapAbapProject.Core` + `SapAbapProject.RfcExtractor`) that
 holds the SAP RFC logic.

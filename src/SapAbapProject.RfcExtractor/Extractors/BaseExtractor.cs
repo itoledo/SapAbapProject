@@ -91,7 +91,8 @@ internal abstract class BaseExtractor : IObjectExtractor
         string tableName,
         IReadOnlyList<string> fields,
         string? whereClause,
-        int maxRows)
+        int maxRows,
+        int rowSkip)
     {
         using var function = Connection.CreateFunction("RFC_READ_TABLE");
         var output = function.Invoke<RfcReadTableOutput>(new RfcReadTableInput
@@ -99,6 +100,7 @@ internal abstract class BaseExtractor : IObjectExtractor
             QueryTable = tableName,
             Delimiter = "|",
             RowCount = maxRows,
+            RowSkips = rowSkip,
             Fields = fields.Select(f => new RfcTableField { FieldName = f }).ToArray(),
             Options = string.IsNullOrEmpty(whereClause)
                 ? []
@@ -137,11 +139,21 @@ internal abstract class BaseExtractor : IObjectExtractor
     private static RfcReadTableOption[] SplitWhereClause(string where)
     {
         var options = new List<RfcReadTableOption>();
-        for (int i = 0; i < where.Length; i += 72)
+        var remaining = where.Trim();
+        while (remaining.Length > 72)
         {
-            var chunk = where.Substring(i, Math.Min(72, where.Length - i));
+            var splitAt = remaining.LastIndexOf(' ', 71);
+            if (splitAt <= 0)
+                splitAt = 72;
+
+            var chunk = remaining.Substring(0, splitAt).TrimEnd();
             options.Add(new RfcReadTableOption { Text = chunk });
+            remaining = remaining.Substring(splitAt).TrimStart();
         }
+
+        if (remaining.Length > 0)
+            options.Add(new RfcReadTableOption { Text = remaining });
+
         return options.ToArray();
     }
 }
@@ -167,6 +179,9 @@ internal sealed class RfcReadTableInput
 
     [SapName("ROWCOUNT")]
     public int RowCount { get; set; }
+
+    [SapName("ROWSKIPS")]
+    public int RowSkips { get; set; }
 
     [SapName("FIELDS")]
     public RfcTableField[] Fields { get; set; } = [];

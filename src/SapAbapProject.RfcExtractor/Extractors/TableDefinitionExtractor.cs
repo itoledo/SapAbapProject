@@ -53,7 +53,7 @@ internal sealed class TableDefinitionExtractor : BaseExtractor
             var tabClass = _objectType == AbapObjectType.TransparentTable ? "TRANSP" : "INTTAB";
             var conditions = new List<string> { $"TABCLASS = '{tabClass}'", "AS4LOCAL = 'A'" };
             if (!string.IsNullOrEmpty(namePattern))
-                conditions.Add($"TABNAME LIKE '{namePattern!.Replace('*', '%')}'");
+                conditions.Add($"TABNAME LIKE '{SapRfcQuery.LikePattern(namePattern!)}'");
 
             var rows = ReadTable("DD02L", ["TABNAME"], string.Join(" AND ", conditions), maxRows);
 

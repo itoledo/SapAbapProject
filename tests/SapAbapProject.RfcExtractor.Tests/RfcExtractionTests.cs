@@ -1,4 +1,5 @@
 using SapAbapProject.Core.Models;
+using System.Text.Json;
 using Xunit.Abstractions;
 
 namespace SapAbapProject.RfcExtractor.Tests;
@@ -25,6 +26,45 @@ public class RfcExtractionTests
         using var extractor = _fixture.CreateExtractor();
         await extractor.TestConnectionAsync();
         _output.WriteLine("RFC_PING succeeded.");
+    }
+
+    [Fact]
+    public async Task GetRfcDefinition_PriceConditions_ShouldReturnParameters()
+    {
+        const string functionName = "ZSW_APP_OC_CONDICIONES_PRECIO";
+
+        using var extractor = _fixture.CreateExtractor();
+        var definition = await extractor.GetRfcFunctionDefinitionAsync(functionName);
+
+        _output.WriteLine(JsonSerializer.Serialize(
+            definition,
+            new JsonSerializerOptions { WriteIndented = true }));
+
+        Assert.Equal(functionName, definition.Name);
+        Assert.NotEmpty(definition.Parameters);
+    }
+
+    [Fact]
+    public async Task ExecuteRfc_PriceConditions_ShouldReturnOutput()
+    {
+        const string functionName = "ZSW_APP_OC_CONDICIONES_PRECIO";
+        var parametersJson = _fixture.GetSetting("Rfc:PriceConditionsParametersJson");
+        var parameters = string.IsNullOrWhiteSpace(parametersJson)
+            ? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            : ParseJsonParameters(parametersJson);
+
+        using var extractor = _fixture.CreateExtractor();
+        var result = await extractor.ExecuteRfcAsync(
+            functionName,
+            parameters,
+            maxTableRows: 500);
+
+        _output.WriteLine(JsonSerializer.Serialize(
+            result,
+            new JsonSerializerOptions { WriteIndented = true }));
+
+        Assert.Equal(functionName, result.FunctionName);
+        Assert.NotEmpty(result.Output);
     }
 
     [Fact]
@@ -466,4 +506,33 @@ public class RfcExtractionTests
                 _output.WriteLine($"         {value.ErrorMessage}");
         }
     }
+
+    private static Dictionary<string, object?> ParseJsonParameters(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException("Rfc:PriceConditionsParametersJson must be a JSON object.");
+
+        return document.RootElement.EnumerateObject().ToDictionary(
+            property => property.Name,
+            property => ConvertJson(property.Value),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static object? ConvertJson(JsonElement element) => element.ValueKind switch
+    {
+        JsonValueKind.Object => element.EnumerateObject().ToDictionary(
+            property => property.Name,
+            property => ConvertJson(property.Value),
+            StringComparer.OrdinalIgnoreCase),
+        JsonValueKind.Array => element.EnumerateArray().Select(ConvertJson).ToList(),
+        JsonValueKind.String => element.GetString(),
+        JsonValueKind.Number when element.TryGetInt64(out var integer) => integer,
+        JsonValueKind.Number when element.TryGetDecimal(out var number) => number,
+        JsonValueKind.Number => element.GetDouble(),
+        JsonValueKind.True => true,
+        JsonValueKind.False => false,
+        JsonValueKind.Null => null,
+        _ => element.GetRawText(),
+    };
 }

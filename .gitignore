@@ -14,6 +14,7 @@ obj/
 ## Build results
 [Dd]ebug/
 [Rr]elease/
+out/
 x64/
 x86/
 [Aa][Rr][Mm]/
@@ -22,6 +23,7 @@ bld/
 [Oo]bj/
 [Ll]og/
 [Ll]ogs/
+dev_rfc.log
 
 ## Test results
 TestResults/

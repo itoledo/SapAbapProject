@@ -41,8 +41,6 @@ public sealed class AbapObjectExtractor : IAbapExtractor
 
         var connParams = new SapConnectionParameters
         {
-            AppServerHost = _settings.AppServerHost,
-            SystemNumber = _settings.SystemNumber,
             Client = _settings.Client,
             User = _settings.User,
             Password = _settings.Password,
@@ -56,11 +54,20 @@ public sealed class AbapObjectExtractor : IAbapExtractor
             if (!string.IsNullOrEmpty(_settings.SystemId))
                 connParams.SystemId = _settings.SystemId;
         }
+        else
+        {
+            connParams.AppServerHost = _settings.AppServerHost;
+            connParams.SystemNumber = _settings.SystemNumber;
+        }
 
         if (_settings.UseSncConnection && !string.IsNullOrEmpty(_settings.SncPartnerName))
         {
             connParams.SncMode = "1";
             connParams.SncPartnerName = _settings.SncPartnerName;
+            if (!string.IsNullOrEmpty(_settings.SncLibraryPath))
+                connParams.SncLibraryPath = _settings.SncLibraryPath;
+            if (!string.IsNullOrEmpty(_settings.SncQop))
+                connParams.SncQop = _settings.SncQop;
         }
 
         if (!string.IsNullOrEmpty(_settings.SapRouter))
@@ -104,7 +111,7 @@ public sealed class AbapObjectExtractor : IAbapExtractor
             {
                 var conn = EnsureConnection();
                 using var func = conn.CreateFunction("RFC_READ_TABLE");
-                var where = $"DEVCLASS LIKE '{searchPattern.Replace('*', '%')}'";
+                var where = $"DEVCLASS LIKE '{SapRfcQuery.LikePattern(searchPattern)}'";
                 var output = func.Invoke<RfcReadTableOutput>(new RfcReadTableInput
                 {
                     QueryTable = "TDEVC",
@@ -139,7 +146,7 @@ public sealed class AbapObjectExtractor : IAbapExtractor
 
                 var where = string.IsNullOrEmpty(packageFilter)
                     ? "PGMID = 'R3TR' AND OBJECT = 'FUGR'"
-                    : $"PGMID = 'R3TR' AND OBJECT = 'FUGR' AND DEVCLASS = '{packageFilter}'";
+                    : $"PGMID = 'R3TR' AND OBJECT = 'FUGR' AND DEVCLASS = '{SapRfcQuery.Literal(packageFilter!)}'";
 
                 var output = func.Invoke<RfcReadTableOutput>(new RfcReadTableInput
                 {
@@ -166,12 +173,19 @@ public sealed class AbapObjectExtractor : IAbapExtractor
         string? packageFilter = null,
         string? functionGroupFilter = null,
         int maxRows = 1000,
+        bool remoteOnly = false,
         CancellationToken cancellationToken = default)
     {
         await _connectionLock.WaitAsync(cancellationToken);
         try
         {
-            return await FunctionModule.ListAsync(namePattern, packageFilter, functionGroupFilter, maxRows, cancellationToken);
+            return await FunctionModule.ListAsync(
+                namePattern,
+                packageFilter,
+                functionGroupFilter,
+                NormalizeMaxRows(maxRows, 1000),
+                remoteOnly,
+                cancellationToken);
         }
         finally { _connectionLock.Release(); }
     }
@@ -186,54 +200,220 @@ public sealed class AbapObjectExtractor : IAbapExtractor
         await _connectionLock.WaitAsync(cancellationToken);
         try
         {
-            var tables = await Table.ListAsync(namePattern, packageFilter, maxRows, cancellationToken);
+            var normalizedMaxRows = NormalizeMaxRows(maxRows, 1000);
+            var tables = await Table.ListAsync(namePattern, packageFilter, normalizedMaxRows, cancellationToken);
             if (!includeStructures) return tables;
 
-            var structures = await Structure.ListAsync(namePattern, packageFilter, maxRows, cancellationToken);
+            var structures = await Structure.ListAsync(namePattern, packageFilter, normalizedMaxRows, cancellationToken);
             return tables.Concat(structures).ToList();
+        }
+        finally { _connectionLock.Release(); }
+    }
+
+    public async Task<IReadOnlyList<RepositoryObjectSummary>> ListRepositoryObjectsAsync(
+        string? objectType = null,
+        string? namePattern = null,
+        string? packageFilter = null,
+        int maxRows = 1000,
+        CancellationToken cancellationToken = default)
+    {
+        await _connectionLock.WaitAsync(cancellationToken);
+        try
+        {
+            EnsureConnection();
+            return await Task.Run<IReadOnlyList<RepositoryObjectSummary>>(() =>
+            {
+                var conditions = new List<string> { "PGMID = 'R3TR'" };
+                if (!string.IsNullOrWhiteSpace(objectType))
+                    conditions.Add($"OBJECT = '{SapRfcQuery.Literal(objectType!.Trim().ToUpperInvariant())}'");
+                if (!string.IsNullOrWhiteSpace(namePattern))
+                    conditions.Add($"OBJ_NAME LIKE '{SapRfcQuery.LikePattern(namePattern!.Trim().ToUpperInvariant())}'");
+                if (!string.IsNullOrWhiteSpace(packageFilter))
+                    conditions.Add($"DEVCLASS = '{SapRfcQuery.Literal(packageFilter!.Trim().ToUpperInvariant())}'");
+
+                var result = Table.ReadTableWithMetadata(
+                    "TADIR",
+                    ["PGMID", "OBJECT", "OBJ_NAME", "DEVCLASS"],
+                    string.Join(" AND ", conditions),
+                    NormalizeMaxRows(maxRows, 1000),
+                    0);
+
+                return result.Rows
+                    .Select(row => new RepositoryObjectSummary(
+                        ProgramId: GetValue(row, "PGMID").Trim(),
+                        ObjectType: GetValue(row, "OBJECT").Trim(),
+                        Name: GetValue(row, "OBJ_NAME").Trim(),
+                        PackageName: NullIfBlank(GetValue(row, "DEVCLASS").Trim())))
+                    .Where(item => item.Name.Length > 0)
+                    .ToList();
+            }, cancellationToken);
         }
         finally { _connectionLock.Release(); }
     }
 
     public async Task<AbapObject?> GetFunctionModuleAsync(string name, CancellationToken cancellationToken = default)
     {
+        var normalizedName = SapRfcQuery.Identifier(name, nameof(name));
         await _connectionLock.WaitAsync(cancellationToken);
-        try { return await FunctionModule.ExtractByNameAsync(name, cancellationToken); }
+        try { return await FunctionModule.ExtractByNameAsync(normalizedName, cancellationToken); }
         finally { _connectionLock.Release(); }
     }
 
     public async Task<AbapObject?> GetTableAsync(string name, CancellationToken cancellationToken = default)
     {
+        var normalizedName = SapRfcQuery.Identifier(name, nameof(name));
         await _connectionLock.WaitAsync(cancellationToken);
-        try { return await Table.ExtractByNameAsync(name, cancellationToken); }
+        try { return await Table.ExtractByNameAsync(normalizedName, cancellationToken); }
         finally { _connectionLock.Release(); }
     }
 
     public async Task<AbapObject?> GetStructureAsync(string name, CancellationToken cancellationToken = default)
     {
+        var normalizedName = SapRfcQuery.Identifier(name, nameof(name));
         await _connectionLock.WaitAsync(cancellationToken);
-        try { return await Structure.ExtractByNameAsync(name, cancellationToken); }
+        try { return await Structure.ExtractByNameAsync(normalizedName, cancellationToken); }
         finally { _connectionLock.Release(); }
     }
 
     public async Task<AbapObject?> GetDataElementAsync(string name, CancellationToken cancellationToken = default)
     {
+        var normalizedName = SapRfcQuery.Identifier(name, nameof(name));
         await _connectionLock.WaitAsync(cancellationToken);
-        try { return await DataElement.ExtractByNameAsync(name, cancellationToken); }
+        try { return await DataElement.ExtractByNameAsync(normalizedName, cancellationToken); }
         finally { _connectionLock.Release(); }
     }
 
     public async Task<AbapObject?> GetDomainAsync(string name, CancellationToken cancellationToken = default)
     {
+        var normalizedName = SapRfcQuery.Identifier(name, nameof(name));
         await _connectionLock.WaitAsync(cancellationToken);
-        try { return await Domain.ExtractByNameAsync(name, cancellationToken); }
+        try { return await Domain.ExtractByNameAsync(normalizedName, cancellationToken); }
         finally { _connectionLock.Release(); }
     }
 
     public async Task<AbapObject?> GetTableTypeAsync(string name, CancellationToken cancellationToken = default)
     {
+        var normalizedName = SapRfcQuery.Identifier(name, nameof(name));
         await _connectionLock.WaitAsync(cancellationToken);
-        try { return await TableType.ExtractByNameAsync(name, cancellationToken); }
+        try { return await TableType.ExtractByNameAsync(normalizedName, cancellationToken); }
+        finally { _connectionLock.Release(); }
+    }
+
+    public async Task<AbapSourceResult?> GetAbapSourceAsync(
+        string name,
+        string sourceKind,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedKind = sourceKind.Trim().ToLowerInvariant();
+        if (normalizedKind == "function_module")
+        {
+            var functionModule = await GetFunctionModuleAsync(name.Trim().ToUpperInvariant(), cancellationToken);
+            return functionModule is null
+                ? null
+                : new AbapSourceResult(
+                    functionModule.Name,
+                    normalizedKind,
+                    functionModule.PackageName,
+                    functionModule.SourceCode);
+        }
+
+        await _connectionLock.WaitAsync(cancellationToken);
+        try
+        {
+            return await Task.Run(() =>
+            {
+                var objectName = SapRfcQuery.Identifier(name, nameof(name));
+                string reportName;
+                string tadirType;
+                string tadirName;
+
+                switch (normalizedKind)
+                {
+                    case "program":
+                    case "include":
+                        reportName = objectName;
+                        tadirType = "PROG";
+                        tadirName = objectName;
+                        break;
+                    case "function_group":
+                        reportName = objectName.StartsWith("SAPL", StringComparison.Ordinal)
+                            ? objectName
+                            : $"SAPL{objectName}";
+                        tadirType = "FUGR";
+                        tadirName = objectName.StartsWith("SAPL", StringComparison.Ordinal)
+                            ? objectName.Substring(4)
+                            : objectName;
+                        break;
+                    default:
+                        throw new ArgumentException(
+                            "sourceKind must be function_module, program, include, or function_group.",
+                            nameof(sourceKind));
+                }
+
+                var conn = EnsureConnection();
+                using var readReport = conn.CreateFunction("RFC_READ_REPORT");
+                var output = readReport.Invoke<ReadReportOutput>(
+                    new ReadReportInput { ProgramName = reportName });
+                var lines = output.Source ?? [];
+                if (lines.Length == 0)
+                    return null;
+
+                var packageRows = Table.ReadTableWithMetadata(
+                    "TADIR",
+                    ["DEVCLASS"],
+                    $"PGMID = 'R3TR' AND OBJECT = '{tadirType}' AND OBJ_NAME = '{SapRfcQuery.Literal(tadirName)}'",
+                    1,
+                    0);
+                var package = packageRows.Rows.Count == 0
+                    ? null
+                    : NullIfBlank(GetValue(packageRows.Rows[0], "DEVCLASS").Trim());
+
+                return new AbapSourceResult(
+                    name.Trim().ToUpperInvariant(),
+                    normalizedKind,
+                    package,
+                    string.Join(Environment.NewLine, lines.Select(line => line.Line)));
+            }, cancellationToken);
+        }
+        finally { _connectionLock.Release(); }
+    }
+
+    public async Task<RfcFunctionDefinition> GetRfcFunctionDefinitionAsync(
+        string functionName,
+        CancellationToken cancellationToken = default)
+    {
+        await _connectionLock.WaitAsync(cancellationToken);
+        try
+        {
+            return await Task.Run(
+                () => RfcRuntimeInvoker.GetDefinition(
+                    EnsureConnection().GetFunctionMetadata(
+                        SapRfcQuery.Identifier(functionName, nameof(functionName)))),
+                cancellationToken);
+        }
+        finally { _connectionLock.Release(); }
+    }
+
+    public async Task<RfcExecutionResult> ExecuteRfcAsync(
+        string functionName,
+        IReadOnlyDictionary<string, object?> parameters,
+        int maxTableRows = 500,
+        CancellationToken cancellationToken = default)
+    {
+        await _connectionLock.WaitAsync(cancellationToken);
+        try
+        {
+            return await Task.Run(() =>
+            {
+                var normalizedName = SapRfcQuery.Identifier(functionName, nameof(functionName));
+                using var function = EnsureConnection().CreateFunction(normalizedName);
+                return RfcRuntimeInvoker.Invoke(
+                    function,
+                    normalizedName,
+                    parameters,
+                    Math.Min(Math.Max(maxTableRows, 1), 5000));
+            }, cancellationToken);
+        }
         finally { _connectionLock.Release(); }
     }
 
@@ -242,6 +422,7 @@ public sealed class AbapObjectExtractor : IAbapExtractor
         IReadOnlyList<string> fields,
         string? whereClause = null,
         int maxRows = 100,
+        int rowSkip = 0,
         CancellationToken cancellationToken = default)
     {
         await _connectionLock.WaitAsync(cancellationToken);
@@ -249,7 +430,12 @@ public sealed class AbapObjectExtractor : IAbapExtractor
         {
             EnsureConnection();
             return await Task.Run(
-                () => Table.ReadTableWithMetadata(tableName, fields, whereClause, maxRows),
+                () => Table.ReadTableWithMetadata(
+                    SapRfcQuery.Identifier(tableName, nameof(tableName)),
+                    fields.Select(field => SapRfcQuery.Identifier(field, nameof(fields))).ToList(),
+                    whereClause,
+                    Math.Min(Math.Max(maxRows, 1), 10000),
+                    Math.Max(rowSkip, 0)),
                 cancellationToken);
         }
         finally { _connectionLock.Release(); }
@@ -331,6 +517,15 @@ public sealed class AbapObjectExtractor : IAbapExtractor
         AbapObjectType.TableType => TableType,
         _ => null,
     };
+
+    private static int NormalizeMaxRows(int maxRows, int defaultValue) =>
+        Math.Min(maxRows > 0 ? maxRows : defaultValue, 10000);
+
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private static string GetValue(IReadOnlyDictionary<string, string> row, string key) =>
+        row.TryGetValue(key, out var value) ? value : string.Empty;
 
     public void Dispose()
     {

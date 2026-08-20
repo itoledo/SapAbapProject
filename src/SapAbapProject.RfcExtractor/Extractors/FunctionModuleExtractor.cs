@@ -49,14 +49,17 @@ internal sealed class FunctionModuleExtractor : BaseExtractor
         string? packageFilter,
         string? functionGroupFilter,
         int maxRows,
+        bool remoteOnly,
         CancellationToken cancellationToken = default) =>
         Task.Run<IReadOnlyList<AbapObjectSummary>>(() =>
         {
             var conditions = new List<string>();
             if (!string.IsNullOrEmpty(namePattern))
-                conditions.Add($"FUNCNAME LIKE '{namePattern!.Replace('*', '%')}'");
+                conditions.Add($"FUNCNAME LIKE '{SapRfcQuery.LikePattern(namePattern!)}'");
             if (!string.IsNullOrEmpty(functionGroupFilter))
-                conditions.Add($"PNAME = 'SAPL{functionGroupFilter}'");
+                conditions.Add($"PNAME = 'SAPL{SapRfcQuery.Literal(functionGroupFilter!)}'");
+            if (remoteOnly)
+                conditions.Add("FMODE = 'R'");
 
             var where = conditions.Count > 0 ? string.Join(" AND ", conditions) : null;
             var rows = ReadTable("TFDIR", ["FUNCNAME", "PNAME"], where, maxRows);
@@ -72,10 +75,13 @@ internal sealed class FunctionModuleExtractor : BaseExtractor
                 string? package = null;
                 if (!string.IsNullOrEmpty(packageFilter) || fugr is not null)
                 {
-                    var devclass = ReadTable("TADIR", ["DEVCLASS"],
-                        $"PGMID = 'R3TR' AND OBJECT = 'FUGR' AND OBJ_NAME = '{fugr}'");
-                    if (devclass.Count > 0)
-                        package = devclass[0]["DEVCLASS"].Trim();
+                    if (fugr is not null)
+                    {
+                        var devclass = ReadTable("TADIR", ["DEVCLASS"],
+                            $"PGMID = 'R3TR' AND OBJECT = 'FUGR' AND OBJ_NAME = '{SapRfcQuery.Literal(fugr)}'");
+                        if (devclass.Count > 0)
+                            package = devclass[0]["DEVCLASS"].Trim();
+                    }
 
                     if (!string.IsNullOrEmpty(packageFilter) &&
                         !string.Equals(package, packageFilter, StringComparison.OrdinalIgnoreCase))
@@ -83,7 +89,7 @@ internal sealed class FunctionModuleExtractor : BaseExtractor
                 }
 
                 string? description = null;
-                var tftit = ReadTableInLanguages("TFTIT", ["STEXT"], $"FUNCNAME = '{name}'", "SPRAS");
+                var tftit = ReadTableInLanguages("TFTIT", ["STEXT"], $"FUNCNAME = '{SapRfcQuery.Literal(name)}'", "SPRAS");
                 if (tftit.Count > 0)
                     description = tftit[0]["STEXT"].Trim();
 

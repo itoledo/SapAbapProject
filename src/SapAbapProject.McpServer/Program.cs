@@ -1,10 +1,13 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using ModelContextProtocol;
 using NLog.Extensions.Logging;
 using SapAbapProject.Core.Interfaces;
 using SapAbapProject.McpServer;
 using SapAbapProject.RfcExtractor;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 // Per MCP best practice for stdio transport: stdout is reserved for JSON-RPC framing.
 // Logs MUST go to stderr or to a file. NLog handles both — see nlog.config.
@@ -31,10 +34,15 @@ var connectionSettings = SapMcpConfiguration.BuildConnectionSettings();
 builder.Services.AddSingleton(connectionSettings);
 builder.Services.AddSingleton<IAbapExtractor>(sp => new AbapObjectExtractor(connectionSettings));
 
+var toolJsonOptions = new JsonSerializerOptions(McpJsonUtilities.DefaultOptions)
+{
+    DefaultIgnoreCondition = JsonIgnoreCondition.Never,
+};
+
 builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()
-    .WithToolsFromAssembly();
+    .WithToolsFromAssembly(serializerOptions: toolJsonOptions);
 
 var app = builder.Build();
 
